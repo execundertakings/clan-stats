@@ -1,0 +1,930 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>APES Clan Stats</title>
+  <meta name="theme-color" content="#070b12" />
+  <script defer src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script defer src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script defer src="https://unpkg.com/@babel/standalone@7.23.10/babel.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-base:    #070b12;
+      --bg-surface: #0c1220;
+      --bg-card:    #111827;
+      --bg-raised:  #172032;
+      --border:     #1c2d42;
+      --border-subtle: #162030;
+      --text-1: #f0f4f8;
+      --text-2: #8b9eb5;
+      --text-3: #4e637a;
+      --accent: #3b82f6;
+      --accent-glow: rgba(59,130,246,.18);
+      --gold:   #f59e0b;
+      --silver: #94a3b8;
+      --bronze: #b45309;
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--bg-base);
+      color: var(--text-1);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    html, body { overflow-x: hidden; width: 100%; max-width: 100vw; }
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #1e3048; border-radius: 10px; }
+    ::-webkit-scrollbar-thumb:hover { background: #2a4060; }
+
+    /* Sidebar nav */
+    .nav-item { display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:8px;cursor:pointer;color:var(--text-2);font-size:13.5px;font-weight:500;transition:all .15s; }
+    .nav-item:hover { background:rgba(255,255,255,.06);color:var(--text-1); }
+    .nav-item.active { background:linear-gradient(90deg,rgba(59,130,246,.18),rgba(59,130,246,.06));color:#60a5fa;border-left:2px solid #3b82f6;margin-left:-2px; }
+    .nav-section { font-size:10px;font-weight:700;color:#2e4a62;text-transform:uppercase;letter-spacing:.1em;padding:18px 12px 6px; }
+
+    /* Cards */
+    .stat-card { background:var(--bg-card);border-radius:14px;padding:20px 22px;border:1px solid var(--border);transition:border-color .2s; }
+    .stat-card:hover { border-color:#243347; }
+
+    /* Spinner */
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spin { animation: spin 1s linear infinite; }
+
+    /* Table */
+    .tbl th { font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;padding:8px 12px;border-bottom:1px solid var(--border); }
+    .tbl td { padding:10px 12px;border-bottom:1px solid var(--border-subtle); }
+    .tbl tr:last-child td { border-bottom:none; }
+    .tbl tr:hover td { background:var(--bg-raised); }
+
+    /* Badges */
+    .badge { display:inline-flex;align-items:center;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600; }
+    .badge-blue   { background:#0a1e3d;color:#60a5fa;border:1px solid #1e3a6e; }
+    .badge-green  { background:#052e16;color:#4ade80;border:1px solid #14532d; }
+    .badge-yellow { background:#1c1203;color:#f59e0b;border:1px solid #451a03; }
+    .badge-gray   { background:#1c2d42;color:#94a3b8;border:1px solid #243347; }
+
+    /* Rank medals */
+    .rank-1 { color:var(--gold);font-weight:800; }
+    .rank-2 { color:var(--silver);font-weight:700; }
+    .rank-3 { color:var(--bronze);font-weight:700; }
+
+    /* Map name pill */
+    .map-pill { font-size:11px;background:var(--bg-raised);border:1px solid var(--border);border-radius:6px;padding:2px 7px;color:var(--text-2); }
+
+    /* Mobile bottom nav */
+    @media (max-width: 768px) {
+      .sidebar { display:none; }
+      .mobile-nav { display:flex; }
+      .main-pad { padding-left:0 !important; margin-left:0 !important; }
+    }
+    @media (min-width: 769px) {
+      .mobile-nav { display:none; }
+    }
+
+    /* Pulse animation for loading skeleton */
+    @keyframes pulse { 0%,100%{opacity:.4} 50%{opacity:.8} }
+    .skeleton { background:var(--bg-raised);border-radius:6px;animation:pulse 1.5s ease-in-out infinite; }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback, useMemo } = React;
+
+// ── API helpers ───────────────────────────────────────────────────────────────
+const api = {
+  async get(path) {
+    const r = await fetch(path);
+    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || `HTTP ${r.status}`); }
+    return r.json();
+  },
+  async post(path, body) {
+    const r = await fetch(path, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+    return data;
+  },
+  async del(path) {
+    const r = await fetch(path, { method:'DELETE' });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+    return data;
+  },
+};
+
+// ── Stat helpers ──────────────────────────────────────────────────────────────
+function kd(kills, deaths) {
+  if (!deaths) return kills.toFixed(2);
+  return (kills / deaths).toFixed(2);
+}
+function pct(n, total) {
+  if (!total) return '0%';
+  return (n / total * 100).toFixed(1) + '%';
+}
+function round(n, d = 1) { return typeof n === 'number' ? n.toFixed(d) : '—'; }
+function num(n) { return typeof n === 'number' ? n.toLocaleString() : '—'; }
+
+// Extract normalised stats from season data for a given mode
+function extractStats(seasonData, mode = 'squad') {
+  if (!seasonData) return null;
+  const attrs = seasonData.data?.attributes?.gameModeStats;
+  if (!attrs) return null;
+  // Try squad-fpp first, then squad
+  return attrs[`${mode}-fpp`] || attrs[mode] || null;
+}
+
+function extractLifetimeStats(lifetimeData, mode = 'squad') {
+  if (!lifetimeData) return null;
+  const attrs = lifetimeData.data?.attributes?.gameModeStats;
+  if (!attrs) return null;
+  return attrs[`${mode}-fpp`] || attrs[mode] || null;
+}
+
+// ── MAP name display ──────────────────────────────────────────────────────────
+const MAP_NAMES = {
+  Baltic_Main:     'Erangel',
+  Chimera_Main:    'Paramo',
+  Desert_Main:     'Miramar',
+  DihorOtok_Main:  'Vikendi',
+  Erangel_Main:    'Erangel',
+  Heaven_Main:     'Haven',
+  Kiki_Main:       'Deston',
+  Range_Main:      'Camp Jackal',
+  Savage_Main:     'Sanhok',
+  Summerland_Main: 'Karakin',
+  Tiger_Main:      'Taego',
+};
+const mapName = m => MAP_NAMES[m] || m;
+
+// ── Icons ─────────────────────────────────────────────────────────────────────
+const Icon = {
+  skull:    () => <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4"><path d="M12 2C8.13 2 5 5.13 5 9c0 2.38 1.19 4.47 3 5.74V17c0 .55.45 1 1 1h6c.55 0 1-.45 1-1v-2.26c1.81-1.27 3-3.36 3-5.74 0-3.87-3.13-7-7-7zm1 13h-2v-2h2v2zm0-4h-2V9h2v2z"/></svg>,
+  trophy:   () => <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4"><path d="M19 5h-2V3H7v2H5c-1.1 0-2 .9-2 2v1c0 2.55 1.92 4.63 4.39 4.94.63 1.5 1.98 2.63 3.61 2.96V19H7v2h10v-2h-4v-3.1c1.63-.33 2.98-1.46 3.61-2.96C19.08 12.63 21 10.55 21 8V7c0-1.1-.9-2-2-2zM5 8V7h2v3.82C5.84 10.4 5 9.3 5 8zm14 0c0 1.3-.84 2.4-2 2.82V7h2v1z"/></svg>,
+  target:   () => <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93V18h2v1.93c-3.94-.49-7-3.85-7-7.93s3.06-7.44 7-7.93V6h2V4.07c3.94.49 7 3.85 7 7.93s-3.06 7.44-7 7.93zM12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4z"/></svg>,
+  star:     () => <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>,
+  users:    () => <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>,
+  chart:    () => <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4"><path d="M5 9.2h3V19H5V9.2zM10.6 5h2.8v14h-2.8V5zM16.2 13h2.8v6h-2.8v-6z"/></svg>,
+  clock:    () => <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zm.01 18c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67V7z"/></svg>,
+  settings: () => <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>,
+  plus:     () => <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>,
+  trash:    () => <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>,
+  refresh:  () => <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>,
+  home:     () => <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>,
+  gamepad:  () => <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4"><path d="M15 7.5V2H9v5.5l3 3 3-3zM7.5 9H2v6h5.5l3-3-3-3zm1 6.5V21h6v-5.5l-3-3-3 3zm7.5-6.5l-3 3 3 3H21V9h-5.5z"/></svg>,
+};
+
+// ── Loading spinner ───────────────────────────────────────────────────────────
+function Spinner({ size = 'md' }) {
+  const s = size === 'sm' ? 'w-4 h-4' : size === 'lg' ? 'w-8 h-8' : 'w-6 h-6';
+  return (
+    <svg className={`${s} spin`} viewBox="0 0 24 24" fill="none">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.37 0 0 5.37 0 12h4z"/>
+    </svg>
+  );
+}
+
+// ── Stat cell ─────────────────────────────────────────────────────────────────
+function StatCell({ label, value, sub, accent = false }) {
+  return (
+    <div className="stat-card flex flex-col gap-1">
+      <div style={{ color: 'var(--text-3)', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em' }}>{label}</div>
+      <div style={{ fontSize: 26, fontWeight: 800, color: accent ? 'var(--accent)' : 'var(--text-1)', lineHeight: 1.1 }}>{value}</div>
+      {sub && <div style={{ color: 'var(--text-3)', fontSize: 12 }}>{sub}</div>}
+    </div>
+  );
+}
+
+// ── Overview tab ──────────────────────────────────────────────────────────────
+function Overview({ members, clanStats, season, loading }) {
+  const totals = useMemo(() => {
+    if (!clanStats?.length) return null;
+    let kills = 0, deaths = 0, wins = 0, matches = 0, damage = 0, top10 = 0, assists = 0;
+    clanStats.forEach(({ season: sd }) => {
+      const s = extractStats(sd);
+      if (!s) return;
+      kills   += s.kills || 0;
+      deaths  += s.losses || 0;
+      wins    += s.wins || 0;
+      matches += s.roundsPlayed || 0;
+      damage  += s.damageDealt || 0;
+      top10   += s.top10s || 0;
+      assists += s.assists || 0;
+    });
+    return { kills, deaths, wins, matches, damage, top10, assists };
+  }, [clanStats]);
+
+  if (loading) return (
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-6">
+      {[...Array(8)].map((_, i) => <div key={i} className="skeleton h-24 rounded-xl"/>)}
+    </div>
+  );
+
+  if (!totals) return (
+    <div className="flex flex-col items-center justify-center h-64 gap-3" style={{ color: 'var(--text-3)' }}>
+      <Icon.users />
+      <p>No clan stats yet. Add members in Settings to get started.</p>
+    </div>
+  );
+
+  return (
+    <div className="p-6 space-y-6">
+      <div>
+        <h2 style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-1)', marginBottom: 4 }}>Clan Overview</h2>
+        <p style={{ color: 'var(--text-3)', fontSize: 13 }}>
+          {members.length} members · Season {season?.id?.replace('division.bro.official.', '') || '—'}
+        </p>
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <StatCell label="Clan Kills"   value={num(totals.kills)}   sub={`${round(totals.kills / Math.max(totals.matches, 1))} avg/match`} />
+        <StatCell label="Clan K/D"     value={kd(totals.kills, totals.deaths)} accent sub={`${num(totals.deaths)} deaths`} />
+        <StatCell label="Total Wins"   value={num(totals.wins)}    sub={pct(totals.wins, totals.matches) + ' win rate'} />
+        <StatCell label="Matches"      value={num(totals.matches)} sub={`${num(totals.top10)} top-10s`} />
+        <StatCell label="Total Damage" value={num(Math.round(totals.damage))} sub={`${num(Math.round(totals.damage / Math.max(totals.matches, 1)))} avg/match`} />
+        <StatCell label="Assists"      value={num(totals.assists)} sub="this season" />
+        <StatCell label="Top 10 Rate"  value={pct(totals.top10, totals.matches)} sub={`${num(totals.top10)} top-10s`} />
+        <StatCell label="Members"      value={members.length} sub="active this season" />
+      </div>
+    </div>
+  );
+}
+
+// ── Leaderboard tab ───────────────────────────────────────────────────────────
+function Leaderboard({ clanStats, loading }) {
+  const [sortBy, setSortBy] = useState('kd');
+
+  const rows = useMemo(() => {
+    if (!clanStats?.length) return [];
+    return clanStats
+      .map(({ member, season: sd, lifetime: ld }) => {
+        const s = extractStats(sd);
+        const l = extractLifetimeStats(ld);
+        return {
+          name:        member.name,
+          kills:       s?.kills || 0,
+          deaths:      s?.losses || 0,
+          wins:        s?.wins || 0,
+          matches:     s?.roundsPlayed || 0,
+          damage:      s?.damageDealt || 0,
+          top10:       s?.top10s || 0,
+          assists:     s?.assists || 0,
+          headshotKills: s?.headshotKills || 0,
+          kd:          s ? parseFloat(kd(s.kills || 0, s.losses || 0)) : 0,
+          winRate:     s?.roundsPlayed ? s.wins / s.roundsPlayed : 0,
+          avgDamage:   s?.roundsPlayed ? (s.damageDealt || 0) / s.roundsPlayed : 0,
+          lifeKills:   l?.kills || 0,
+          lifeKd:      l ? parseFloat(kd(l.kills || 0, l.losses || 0)) : 0,
+        };
+      })
+      .sort((a, b) => {
+        const map = { kd: 'kd', kills: 'kills', wins: 'wins', damage: 'avgDamage', top10: 'top10' };
+        return b[map[sortBy] || sortBy] - a[map[sortBy] || sortBy];
+      });
+  }, [clanStats, sortBy]);
+
+  const sortBtn = (key, label) => (
+    <button
+      onClick={() => setSortBy(key)}
+      style={{
+        fontSize: 11, fontWeight: 700, color: sortBy === key ? 'var(--accent)' : 'var(--text-3)',
+        background: 'none', border: 'none', cursor: 'pointer', padding: '4px 8px',
+        borderRadius: 6, transition: 'all .15s',
+        background: sortBy === key ? 'rgba(59,130,246,.12)' : 'transparent',
+      }}
+    >{label}</button>
+  );
+
+  if (loading) return <div className="p-6"><div className="skeleton h-64 rounded-xl"/></div>;
+
+  if (!rows.length) return (
+    <div className="flex flex-col items-center justify-center h-64 gap-3" style={{ color: 'var(--text-3)' }}>
+      <Icon.chart />
+      <p>No data yet. Add members in Settings.</p>
+    </div>
+  );
+
+  return (
+    <div className="p-6 space-y-4">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <h2 style={{ fontSize: 18, fontWeight: 700 }}>Leaderboard</h2>
+        <div className="flex gap-1 flex-wrap" style={{ background: 'var(--bg-card)', borderRadius: 8, padding: 4, border: '1px solid var(--border)' }}>
+          {sortBtn('kd', 'K/D')}
+          {sortBtn('kills', 'Kills')}
+          {sortBtn('wins', 'Wins')}
+          {sortBtn('damage', 'Avg Dmg')}
+          {sortBtn('top10', 'Top 10')}
+        </div>
+      </div>
+      <div className="stat-card overflow-x-auto p-0">
+        <table className="w-full tbl">
+          <thead>
+            <tr>
+              <th style={{ textAlign: 'left' }}>#</th>
+              <th style={{ textAlign: 'left' }}>Player</th>
+              <th style={{ textAlign: 'right' }}>K/D</th>
+              <th style={{ textAlign: 'right' }}>Kills</th>
+              <th style={{ textAlign: 'right' }}>Wins</th>
+              <th style={{ textAlign: 'right' }}>Win%</th>
+              <th style={{ textAlign: 'right' }}>Avg Dmg</th>
+              <th style={{ textAlign: 'right' }}>Top 10</th>
+              <th style={{ textAlign: 'right' }}>Matches</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={r.name}>
+                <td>
+                  <span className={i === 0 ? 'rank-1' : i === 1 ? 'rank-2' : i === 2 ? 'rank-3' : ''} style={{ fontWeight: 600 }}>
+                    {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : i + 1}
+                  </span>
+                </td>
+                <td style={{ fontWeight: 600, color: 'var(--text-1)' }}>{r.name}</td>
+                <td style={{ textAlign: 'right', fontWeight: 700, color: r.kd >= 2 ? '#4ade80' : r.kd >= 1 ? 'var(--text-1)' : '#f87171' }}>{r.kd.toFixed(2)}</td>
+                <td style={{ textAlign: 'right' }}>{num(r.kills)}</td>
+                <td style={{ textAlign: 'right', color: '#f59e0b', fontWeight: r.wins > 0 ? 600 : 400 }}>{num(r.wins)}</td>
+                <td style={{ textAlign: 'right' }}>{pct(r.wins, r.matches)}</td>
+                <td style={{ textAlign: 'right' }}>{round(r.avgDamage, 0)}</td>
+                <td style={{ textAlign: 'right' }}>{num(r.top10)}</td>
+                <td style={{ textAlign: 'right', color: 'var(--text-2)' }}>{num(r.matches)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ── Players tab ───────────────────────────────────────────────────────────────
+function Players({ clanStats, loading }) {
+  const [selected, setSelected] = useState(null);
+  const [matches, setMatches]   = useState(null);
+  const [matchLoading, setMatchLoading] = useState(false);
+  const [matchError, setMatchError]     = useState(null);
+
+  const loadMatches = useCallback(async (member) => {
+    setSelected(member);
+    setMatches(null);
+    setMatchError(null);
+    setMatchLoading(true);
+    try {
+      const d = await api.get(`/api/matches/player?accountId=${member.accountId}&limit=5`);
+      setMatches(d.matches);
+    } catch (e) {
+      setMatchError(e.message);
+    } finally {
+      setMatchLoading(false);
+    }
+  }, []);
+
+  if (loading) return <div className="p-6 grid md:grid-cols-2 gap-4">{[...Array(4)].map((_,i) => <div key={i} className="skeleton h-40 rounded-xl"/>)}</div>;
+
+  if (!clanStats?.length) return (
+    <div className="flex flex-col items-center justify-center h-64 gap-3" style={{ color: 'var(--text-3)' }}>
+      <Icon.users />
+      <p>No members yet. Add members in Settings.</p>
+    </div>
+  );
+
+  return (
+    <div className="p-6 space-y-4">
+      <h2 style={{ fontSize: 18, fontWeight: 700 }}>Players</h2>
+      <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {clanStats.map(({ member, season: sd, lifetime: ld, seasonError }) => {
+          const s = extractStats(sd);
+          const l = extractLifetimeStats(ld);
+          const isSelected = selected?.accountId === member.accountId;
+          return (
+            <div
+              key={member.accountId}
+              className="stat-card cursor-pointer select-none"
+              style={{ borderColor: isSelected ? 'var(--accent)' : undefined, transition: 'border-color .15s' }}
+              onClick={() => isSelected ? setSelected(null) : loadMatches(member)}
+            >
+              <div className="flex items-start justify-between mb-3">
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--text-1)' }}>{member.name}</div>
+                  {seasonError && <div style={{ color: '#f87171', fontSize: 11, marginTop: 2 }}>No data this season</div>}
+                </div>
+                <span className="badge badge-blue" style={{ fontSize: 10 }}>SQUAD</span>
+              </div>
+              {s ? (
+                <div className="grid grid-cols-3 gap-3">
+                  <div>
+                    <div style={{ color: 'var(--text-3)', fontSize: 10, fontWeight: 700, textTransform: 'uppercase' }}>K/D</div>
+                    <div style={{ fontWeight: 800, fontSize: 18, color: s.kills/Math.max(s.losses,1) >= 2 ? '#4ade80' : 'var(--text-1)' }}>
+                      {kd(s.kills || 0, s.losses || 0)}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ color: 'var(--text-3)', fontSize: 10, fontWeight: 700, textTransform: 'uppercase' }}>Wins</div>
+                    <div style={{ fontWeight: 700, fontSize: 18, color: s.wins > 0 ? '#f59e0b' : 'var(--text-2)' }}>{s.wins || 0}</div>
+                  </div>
+                  <div>
+                    <div style={{ color: 'var(--text-3)', fontSize: 10, fontWeight: 700, textTransform: 'uppercase' }}>Matches</div>
+                    <div style={{ fontWeight: 600, fontSize: 18 }}>{s.roundsPlayed || 0}</div>
+                  </div>
+                  <div>
+                    <div style={{ color: 'var(--text-3)', fontSize: 10, fontWeight: 700, textTransform: 'uppercase' }}>Kills</div>
+                    <div style={{ fontWeight: 600 }}>{num(s.kills || 0)}</div>
+                  </div>
+                  <div>
+                    <div style={{ color: 'var(--text-3)', fontSize: 10, fontWeight: 700, textTransform: 'uppercase' }}>Avg Dmg</div>
+                    <div style={{ fontWeight: 600 }}>{round(s.damageDealt / Math.max(s.roundsPlayed, 1), 0)}</div>
+                  </div>
+                  <div>
+                    <div style={{ color: 'var(--text-3)', fontSize: 10, fontWeight: 700, textTransform: 'uppercase' }}>Top 10</div>
+                    <div style={{ fontWeight: 600 }}>{s.top10s || 0}</div>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ color: 'var(--text-3)', fontSize: 13 }}>No season data</div>
+              )}
+              <div style={{ marginTop: 10, fontSize: 11, color: 'var(--text-3)' }}>
+                Click to {isSelected ? 'hide' : 'view'} recent matches
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Match history panel */}
+      {selected && (
+        <div className="stat-card space-y-3">
+          <div style={{ fontWeight: 700, fontSize: 15 }}>Recent Matches — {selected.name}</div>
+          {matchLoading && <div className="flex items-center gap-2" style={{ color: 'var(--text-2)' }}><Spinner size="sm" /> Loading matches...</div>}
+          {matchError && <div style={{ color: '#f87171' }}>Error: {matchError}</div>}
+          {matches && matches.length === 0 && <div style={{ color: 'var(--text-3)' }}>No recent matches found.</div>}
+          {matches && matches.length > 0 && (
+            <div className="overflow-x-auto">
+              <table className="w-full tbl">
+                <thead>
+                  <tr>
+                    <th style={{ textAlign: 'left' }}>Map</th>
+                    <th style={{ textAlign: 'left' }}>Mode</th>
+                    <th style={{ textAlign: 'right' }}>Place</th>
+                    <th style={{ textAlign: 'right' }}>Kills</th>
+                    <th style={{ textAlign: 'right' }}>Dmg</th>
+                    <th style={{ textAlign: 'right' }}>Survived</th>
+                    <th style={{ textAlign: 'left' }}>Date</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {matches.map(m => {
+                    const ps = m.playerStats;
+                    const mins = ps ? Math.floor(ps.timeSurvived / 60) : null;
+                    const date = new Date(m.createdAt).toLocaleDateString();
+                    const isWin = m.placement === 1;
+                    return (
+                      <tr key={m.matchId}>
+                        <td><span className="map-pill">{mapName(m.mapName)}</span></td>
+                        <td style={{ color: 'var(--text-2)', fontSize: 12 }}>{m.gameMode}</td>
+                        <td style={{ textAlign: 'right', fontWeight: 700, color: isWin ? '#f59e0b' : 'var(--text-1)' }}>
+                          {isWin ? '🏆 #1' : m.placement ? `#${m.placement}` : '—'}
+                        </td>
+                        <td style={{ textAlign: 'right', fontWeight: 600 }}>{ps?.kills ?? '—'}</td>
+                        <td style={{ textAlign: 'right' }}>{ps ? round(ps.damageDealt, 0) : '—'}</td>
+                        <td style={{ textAlign: 'right', color: 'var(--text-2)' }}>{mins != null ? `${mins}m` : '—'}</td>
+                        <td style={{ color: 'var(--text-3)', fontSize: 12 }}>{date}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Settings tab ──────────────────────────────────────────────────────────────
+function Settings({ members, onMembersChange }) {
+  const [clanInfo, setClanInfo]   = useState(null);
+
+  // Bulk import state
+  const [bulkNames, setBulkNames] = useState('');
+  const [bulking, setBulking]     = useState(false);
+  const [bulkResult, setBulkResult] = useState(null);
+  const [bulkError, setBulkError]   = useState(null);
+
+  // Add individual member state
+  const [newName, setNewName]   = useState('');
+  const [adding, setAdding]     = useState(false);
+  const [addError, setAddError] = useState(null);
+  const [addOk, setAddOk]       = useState(null);
+  const [removing, setRemoving] = useState(null);
+  const [clearing, setClearing] = useState(false);
+
+  useEffect(() => {
+    api.get('/api/clan/info').then(d => { if (d.clanId) setClanInfo(d); }).catch(() => {});
+  }, []);
+
+  async function bulkImport(e) {
+    e.preventDefault();
+    if (!bulkNames.trim()) return;
+    setBulking(true);
+    setBulkResult(null);
+    setBulkError(null);
+    try {
+      const names = bulkNames.split(/[\n,]+/).map(n => n.trim()).filter(Boolean);
+      const result = await api.post('/api/members/bulk', { names });
+      setBulkResult(result);
+      setBulkNames('');
+      onMembersChange();
+    } catch (e) {
+      setBulkError(e.message);
+    } finally {
+      setBulking(false);
+    }
+  }
+
+  async function addMember(e) {
+    e.preventDefault();
+    if (!newName.trim()) return;
+    setAdding(true);
+    setAddError(null);
+    setAddOk(null);
+    try {
+      await api.post('/api/members', { name: newName.trim() });
+      setAddOk(`${newName.trim()} added!`);
+      setNewName('');
+      onMembersChange();
+    } catch (e) {
+      setAddError(e.message);
+    } finally {
+      setAdding(false);
+    }
+  }
+
+  async function removeMember(name) {
+    setRemoving(name);
+    try {
+      await api.del(`/api/members/${encodeURIComponent(name)}`);
+      onMembersChange();
+    } catch (e) {
+      alert(e.message);
+    } finally {
+      setRemoving(null);
+    }
+  }
+
+  async function clearCache() {
+    setClearing(true);
+    try { await api.post('/api/cache/clear', {}); } catch {}
+    setClearing(false);
+  }
+
+  return (
+    <div className="p-6 space-y-6 max-w-lg">
+      <h2 style={{ fontSize: 18, fontWeight: 700 }}>Settings</h2>
+
+      {/* ── Clan info banner ── */}
+      {clanInfo && (
+        <div className="stat-card" style={{ borderColor: 'var(--accent)', display:'flex', alignItems:'center', gap:14 }}>
+          <div style={{ fontSize: 28 }}>🦍</div>
+          <div>
+            <div style={{ fontWeight:700, fontSize:15 }}>{clanInfo.clanName} <span style={{ color:'var(--text-3)', fontWeight:400, fontSize:13 }}>[{clanInfo.clanTag}]</span></div>
+            <div style={{ color:'var(--text-3)', fontSize:12 }}>Level {clanInfo.clanLevel} · {clanInfo.clanMemberCount} members · {members.length} imported</div>
+          </div>
+          <span className="badge badge-green" style={{ marginLeft:'auto' }}>Connected</span>
+        </div>
+      )}
+
+      {/* ── Bulk Import ── */}
+      <div className="stat-card space-y-3">
+        <div style={{ fontWeight: 700, fontSize: 14 }}>📋 Bulk Import Members</div>
+        <p style={{ color: 'var(--text-3)', fontSize: 12 }}>
+          Paste your clan roster — one username per line, or comma-separated. We'll resolve all names in batches (3–4 API calls for a full 29-person roster).
+        </p>
+        <form onSubmit={bulkImport} className="flex flex-col gap-2">
+          <textarea
+            value={bulkNames}
+            onChange={e => setBulkNames(e.target.value)}
+            placeholder={'PlayerOne\nPlayerTwo\nPlayerThree\n...'}
+            rows={6}
+            style={{
+              width: '100%', background: 'var(--bg-raised)', border: '1px solid var(--border)',
+              borderRadius: 8, padding: '8px 12px', color: 'var(--text-1)',
+              fontSize: 13, outline: 'none', resize: 'vertical', fontFamily: 'monospace',
+            }}
+          />
+          <button
+            type="submit"
+            disabled={bulking || !bulkNames.trim()}
+            style={{
+              alignSelf: 'flex-start', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8,
+              padding: '8px 18px', fontWeight: 600, fontSize: 13,
+              cursor: bulking ? 'not-allowed' : 'pointer',
+              display: 'flex', alignItems: 'center', gap: 6, opacity: bulking ? .6 : 1,
+            }}
+          >
+            {bulking ? <Spinner size="sm" /> : <Icon.users />}
+            {bulking ? 'Importing…' : 'Import All'}
+          </button>
+        </form>
+        {bulking && (
+          <div style={{ color:'var(--text-2)', fontSize:12 }}>
+            Resolving names via PUBG API — rate-limited to 10/min, may take a moment for large rosters…
+          </div>
+        )}
+        {bulkError && <div style={{ color: '#f87171', fontSize: 12 }}>⚠ {bulkError}</div>}
+        {bulkResult && (
+          <div style={{ background:'rgba(74,222,128,.08)',border:'1px solid rgba(74,222,128,.2)',borderRadius:8,padding:'10px 14px',fontSize:13 }}>
+            <div style={{ fontWeight:700,color:'#4ade80' }}>✓ Import complete</div>
+            <div style={{ color:'var(--text-2)',marginTop:4,fontSize:12 }}>
+              {bulkResult.added} added · {bulkResult.skipped} already existed
+              {bulkResult.notFound?.length > 0 && (
+                <span style={{ color:'#f87171' }}> · {bulkResult.notFound.length} not found: {bulkResult.notFound.join(', ')}</span>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── Add single member ── */}
+      <div className="stat-card space-y-3">
+        <div style={{ fontWeight: 600, fontSize: 14 }}>Add Single Member</div>
+        <p style={{ color: 'var(--text-3)', fontSize: 12 }}>
+          Add someone who isn't on the bulk list above.
+        </p>
+        <form onSubmit={addMember} className="flex gap-2">
+          <input
+            value={newName}
+            onChange={e => setNewName(e.target.value)}
+            placeholder="PUBG username..."
+            style={{
+              flex: 1, background: 'var(--bg-raised)', border: '1px solid var(--border)',
+              borderRadius: 8, padding: '8px 12px', color: 'var(--text-1)',
+              fontSize: 13, outline: 'none',
+            }}
+          />
+          <button
+            type="submit"
+            disabled={adding || !newName.trim()}
+            style={{
+              background: 'var(--bg-raised)', color: 'var(--text-1)', border: '1px solid var(--border)', borderRadius: 8,
+              padding: '8px 16px', fontWeight: 600, fontSize: 13, cursor: adding ? 'not-allowed' : 'pointer',
+              display: 'flex', alignItems: 'center', gap: 6, opacity: adding ? .6 : 1,
+            }}
+          >
+            {adding ? <Spinner size="sm" /> : <Icon.plus />}
+            Add
+          </button>
+        </form>
+        {addError && <div style={{ color: '#f87171', fontSize: 12 }}>⚠ {addError}</div>}
+        {addOk    && <div style={{ color: '#4ade80', fontSize: 12 }}>✓ {addOk}</div>}
+      </div>
+
+      {/* ── Member list ── */}
+      <div className="stat-card space-y-2 p-0">
+        <div style={{ padding: '16px 20px', fontWeight: 600, borderBottom: '1px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+          <span>Clan Members ({members.length})</span>
+          {members.length > 0 && clanInfo && (
+            <span style={{ fontSize:11,color:'var(--text-3)' }}>from {clanInfo.clanName}</span>
+          )}
+        </div>
+        {members.length === 0 && (
+          <div style={{ padding: '20px', color: 'var(--text-3)', fontSize: 13 }}>
+            No members yet — use Connect above to import the whole clan at once.
+          </div>
+        )}
+        {members.map(m => (
+          <div key={m.accountId} style={{ display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 20px',borderBottom:'1px solid var(--border-subtle)' }}>
+            <div>
+              <div style={{ fontWeight: 600, display:'flex', alignItems:'center', gap:6 }}>
+                {m.name}
+                {m.source === 'clan' && <span className="badge badge-blue" style={{ fontSize:9 }}>clan</span>}
+              </div>
+              <div style={{ color: 'var(--text-3)', fontSize: 11, fontFamily: 'monospace' }}>{m.accountId}</div>
+            </div>
+            <button
+              onClick={() => removeMember(m.name)}
+              disabled={removing === m.name}
+              style={{ background:'rgba(239,68,68,.12)',border:'1px solid rgba(239,68,68,.25)',borderRadius:6,color:'#f87171',padding:'4px 8px',cursor:'pointer',display:'flex',alignItems:'center',gap:4,fontSize:12 }}
+            >
+              {removing === m.name ? <Spinner size="sm" /> : <Icon.trash />}
+              Remove
+            </button>
+          </div>
+        ))}
+      </div>
+
+      {/* ── Cache ── */}
+      <div className="stat-card space-y-2">
+        <div style={{ fontWeight: 600 }}>Cache</div>
+        <p style={{ color: 'var(--text-3)', fontSize: 12 }}>
+          API responses are cached to stay under the 10 RPM limit. Clear if you need fresh data immediately.
+        </p>
+        <button
+          onClick={clearCache}
+          disabled={clearing}
+          style={{ background:'var(--bg-raised)',border:'1px solid var(--border)',borderRadius:8,color:'var(--text-2)',padding:'8px 14px',cursor:'pointer',display:'flex',alignItems:'center',gap:6,fontSize:13 }}
+        >
+          {clearing ? <Spinner size="sm" /> : <Icon.refresh />}
+          Clear Cache
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Pre-warm progress bar ─────────────────────────────────────────────────────
+function PrewarmBanner({ status, onDone }) {
+  if (!status || status.done) return null;
+  const pct = status.total ? Math.round(status.completed / status.total * 100) : 0;
+  return (
+    <div style={{ position:'fixed', bottom: 60, left: 0, right: 0, zIndex: 50, padding: '0 16px', pointerEvents:'none' }}>
+      <div style={{ maxWidth: 420, margin: '0 auto', background:'var(--bg-card)', border:'1px solid var(--border)', borderRadius:12, padding:'12px 16px', boxShadow:'0 4px 24px rgba(0,0,0,.4)' }}>
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:8 }}>
+          <span style={{ fontSize:12, fontWeight:600, color:'var(--text-2)' }}>
+            {status.running ? `Loading stats… ${status.completed}/${status.total} players` : 'Stats loaded'}
+          </span>
+          <span style={{ fontSize:11, color:'var(--text-3)' }}>{pct}%</span>
+        </div>
+        <div style={{ height:4, background:'var(--bg-raised)', borderRadius:99, overflow:'hidden' }}>
+          <div style={{ height:'100%', width: pct+'%', background:'var(--accent)', borderRadius:99, transition:'width .4s ease' }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Main App ──────────────────────────────────────────────────────────────────
+function App() {
+  const [tab, setTab]           = useState('overview');
+  const [members, setMembers]   = useState([]);
+  const [seasons, setSeasons]   = useState([]);
+  const [currentSeason, setCurrentSeason] = useState(null);
+  const [clanStats, setClanStats] = useState(null);
+  const [loading, setLoading]   = useState(true);
+  const [error, setError]       = useState(null);
+  const [lastRefresh, setLastRefresh] = useState(null);
+  const [prewarm, setPrewarm]   = useState(null);
+
+  // Poll pre-warm status until done, then reload stats
+  useEffect(() => {
+    let timer;
+    async function pollPrewarm() {
+      try {
+        const status = await api.get('/api/prewarm/status');
+        setPrewarm(status);
+        if (status.running) {
+          timer = setTimeout(pollPrewarm, 3000);
+        } else if (status.done && status.completed > 0) {
+          // Cache is hot — load the full stats
+          loadData();
+        }
+      } catch {}
+    }
+    pollPrewarm();
+    return () => clearTimeout(timer);
+  }, []);
+
+  // Load baseline data
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [membersData, seasonsData] = await Promise.all([
+        api.get('/api/members'),
+        api.get('/api/seasons'),
+      ]);
+      setMembers(membersData.members || []);
+      const allSeasons = seasonsData.seasons || [];
+      setSeasons(allSeasons);
+      const current = allSeasons.find(s => s.attributes?.isCurrentSeason);
+      setCurrentSeason(current || null);
+
+      if ((membersData.members || []).length > 0) {
+        const statsData = await api.get('/api/clan/stats');
+        setClanStats(statsData.stats || []);
+      } else {
+        setClanStats([]);
+      }
+      setLastRefresh(new Date());
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { loadData(); }, []);
+
+  const onMembersChange = useCallback(() => { loadData(); }, [loadData]);
+
+  const tabs = [
+    { id: 'overview',     label: 'Overview',    Icon: Icon.home },
+    { id: 'leaderboard', label: 'Leaderboard', Icon: Icon.trophy },
+    { id: 'players',     label: 'Players',     Icon: Icon.users },
+    { id: 'settings',    label: 'Settings',    Icon: Icon.settings },
+  ];
+
+  return (
+    <div style={{ display: 'flex', minHeight: '100vh' }}>
+      {/* Sidebar */}
+      <div className="sidebar" style={{ width: 220, background: 'var(--bg-surface)', borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', padding: '20px 12px', flexShrink: 0, position: 'fixed', top: 0, left: 0, bottom: 0, zIndex: 10 }}>
+        {/* Logo */}
+        <div style={{ padding: '0 8px 20px', borderBottom: '1px solid var(--border)', marginBottom: 8 }}>
+          <div style={{ fontWeight: 800, fontSize: 17, color: 'var(--text-1)', letterSpacing: '-.01em' }}>🦍 APES</div>
+          <div style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.08em' }}>Clan Stats</div>
+        </div>
+        <div className="nav-section">Navigation</div>
+        {tabs.map(t => (
+          <div key={t.id} className={`nav-item ${tab === t.id ? 'active' : ''}`} onClick={() => setTab(t.id)}>
+            <t.Icon />
+            {t.label}
+          </div>
+        ))}
+        <div style={{ flex: 1 }} />
+        {/* Bottom status */}
+        <div style={{ padding: '12px 8px 0', borderTop: '1px solid var(--border)', marginTop: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--text-3)' }}>
+            <div style={{ width: 6, height: 6, borderRadius: '50%', background: error ? '#f87171' : '#4ade80' }} />
+            {error ? 'API Error' : `${members.length} members`}
+          </div>
+          {lastRefresh && (
+            <div style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 2 }}>
+              Updated {lastRefresh.toLocaleTimeString()}
+            </div>
+          )}
+          <button
+            onClick={loadData}
+            disabled={loading}
+            style={{ marginTop: 8, display:'flex',alignItems:'center',gap:4,fontSize:11,color:'var(--text-3)',background:'none',border:'none',cursor:'pointer',padding:0 }}
+          >
+            {loading ? <Spinner size="sm" /> : <Icon.refresh />}
+            Refresh
+          </button>
+        </div>
+      </div>
+
+      {/* Main content */}
+      <div className="main-pad" style={{ flex: 1, marginLeft: 220, minHeight: '100vh' }}>
+        {/* Header */}
+        <div style={{ borderBottom: '1px solid var(--border)', padding: '16px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--bg-surface)', position: 'sticky', top: 0, zIndex: 9 }}>
+          <div>
+            <span style={{ fontWeight: 700, fontSize: 15 }}>{tabs.find(t => t.id === tab)?.label}</span>
+            {currentSeason && (
+              <span className="badge badge-blue" style={{ marginLeft: 10 }}>
+                {currentSeason.id.replace('division.bro.official.', '')}
+              </span>
+            )}
+          </div>
+          {error && <div style={{ color: '#f87171', fontSize: 12 }}>⚠ {error}</div>}
+        </div>
+
+        {/* Tab content */}
+        {tab === 'overview'     && <Overview     members={members}    clanStats={clanStats} season={currentSeason} loading={loading} />}
+        {tab === 'leaderboard' && <Leaderboard  clanStats={clanStats} loading={loading} />}
+        {tab === 'players'     && <Players      clanStats={clanStats} loading={loading} />}
+        {tab === 'settings'    && <Settings     members={members}    onMembersChange={onMembersChange} />}
+      </div>
+
+      <PrewarmBanner status={prewarm} />
+
+      {/* Mobile bottom nav */}
+      <div className="mobile-nav" style={{ position: 'fixed', bottom: 0, left: 0, right: 0, background: 'var(--bg-surface)', borderTop: '1px solid var(--border)', padding: '8px 0', zIndex: 20, justifyContent: 'space-around' }}>
+        {tabs.map(t => (
+          <div key={t.id} onClick={() => setTab(t.id)} style={{ display:'flex',flexDirection:'column',alignItems:'center',gap:3,padding:'4px 12px',cursor:'pointer',color: tab === t.id ? 'var(--accent)' : 'var(--text-3)',fontSize:10,fontWeight:600 }}>
+            <t.Icon />
+            {t.label}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+function boot() {
+  const root = document.getElementById('root');
+  ReactDOM.createRoot(root).render(<App />);
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', boot);
+} else {
+  // Scripts are deferred — React/Babel may still be loading
+  const check = setInterval(() => {
+    if (window.React && window.ReactDOM && window.Babel) {
+      clearInterval(check);
+      boot();
+    }
+  }, 50);
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,18 @@
+# Environment / secrets
+.env
+
+# Runtime data (not source)
+data/members.json
+data/clan.json
+data/scraped_members.json
+data/scrape.log
+
+# Logs
+*.log
+/tmp/
+
+# macOS
+.DS_Store
+
+# Node
+node_modules/
