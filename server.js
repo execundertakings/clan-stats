@@ -433,48 +433,9 @@ async function router(req, res) {
     return serveStatic(res, path.join(BASE, 'overlay.html'));
   }
 
-  // ── JS bundle — concatenate all modules in order so Babel sees one scope ────
-  if (p === '/js/bundle.js') {
-    const JS_MODULES = [
-      'helpers.js', 'components.js', 'overview.js', 'leaderboard.js',
-      'players.js', 'settings.js', 'trends.js', 'heatmap.js',
-      'secret-keys.js', 'app.js',
-    ];
-    try {
-      const parts = JS_MODULES.map(f => fs.readFileSync(path.join(BASE, 'js', f), 'utf8'));
-      const bundle = parts.join('\n\n');
-      const buf = Buffer.from(bundle, 'utf8');
-      res.writeHead(200, { 'Content-Type': 'application/javascript', 'Content-Length': buf.length });
-      return res.end(buf);
-    } catch (e) {
-      res.writeHead(500); return res.end('Bundle error: ' + e.message);
-    }
-  }
-
   // ── Static files ────────────────────────────────────────────────────────────
   if (p === '/' || p === '/index.html') {
-    // Inline the JS bundle into the HTML so Babel processes one unified script
-    // (Babel standalone doesn't reliably share scope across external src tags)
-    const JS_MODULES = [
-      'helpers.js', 'components.js', 'overview.js', 'leaderboard.js',
-      'players.js', 'settings.js', 'trends.js', 'heatmap.js',
-      'secret-keys.js', 'app.js',
-    ];
-    try {
-      const html = fs.readFileSync(path.join(BASE, 'index.html'), 'utf8');
-      const parts = JS_MODULES.map(f => fs.readFileSync(path.join(BASE, 'js', f), 'utf8'));
-      const bundle = parts.join('\n\n');
-      const inlined = html.replace(
-        '<script type="text/babel" src="/js/bundle.js"></script>',
-        `<script type="text/babel">\n${bundle}\n</script>`
-      );
-      const buf = Buffer.from(inlined, 'utf8');
-      res.writeHead(200, { 'Content-Type': 'text/html', 'Content-Length': buf.length });
-      return res.end(buf);
-    } catch (e) {
-      // Fallback to static file if inlining fails
-      return serveStatic(res, path.join(BASE, 'index.html'));
-    }
+    return serveStatic(res, path.join(BASE, 'index.html'));
   }
 
   // Anything else in project root (icons, manifest, etc.)

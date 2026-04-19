@@ -8,10 +8,9 @@
   <link rel="manifest" href="/manifest.json" />
   <link rel="icon" href="/icon-192.png" type="image/png" />
   <link rel="apple-touch-icon" href="/icon-192.png" />
-  <script defer src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="/dist/styles.css" />
   <script defer src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script defer src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-  <script defer src="https://unpkg.com/@babel/standalone@7.23.10/babel.min.js"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -193,7 +192,7 @@
 </script>
 <div id="root"></div>
 
-<script type="text/babel" src="/js/bundle.js"></script>
+<script defer src="/dist/bundle.js"></script>
 <script>
 if ('serviceWorker' in navigator) {
   // Clear stale SW caches so code changes take effect immediately

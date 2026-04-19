@@ -386,7 +386,7 @@ function Trends({ resolvedStats, loading, weaponData, squadData, heatmapData }) 
         {peerRows.map((p, i) => {
           const isFocus = i === 0;
           return (
-            <div key={p.name} style={{ display: 'flex', alignItems: 'flex-start', gap: 6, padding: '7px 0', borderBottom: i < peerRows.length-1 ? '1px solid var(--border)' : 'none', background: isFocus ? 'rgba(250,204,21,.04)' : 'transparent', borderRadius: isFocus ? 6 : 0, margin: isFocus ? '2px -4px' : 0, padding: isFocus ? '7px 4px' : '7px 0' }}>
+            <div key={p.name} style={{ display: 'flex', alignItems: 'flex-start', gap: 6, borderBottom: i < peerRows.length-1 ? '1px solid var(--border)' : 'none', background: isFocus ? 'rgba(250,204,21,.04)' : 'transparent', borderRadius: isFocus ? 6 : 0, margin: isFocus ? '2px -4px' : 0, padding: isFocus ? '7px 4px' : '7px 0' }}>
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 12.5, fontWeight: isFocus ? 700 : 400, color: isFocus ? '#facc15' : 'var(--text-2)' }}>{p.name}</div>
                 {isFocus && <div style={{ fontSize: 9.5, color: 'var(--text-3)', marginTop: 1 }}>focus player</div>}

@@ -258,14 +258,17 @@ function boot() {
   ReactDOM.createRoot(root).render(<App />);
 }
 
+// Scripts are deferred — DOM is ready but React CDN may still be resolving.
+// Poll briefly to handle any race between React CDN and our bundle.
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', boot);
+} else if (window.React && window.ReactDOM) {
+  boot();
 } else {
-  // Scripts are deferred — React/Babel may still be loading
   const check = setInterval(() => {
-    if (window.React && window.ReactDOM && window.Babel) {
+    if (window.React && window.ReactDOM) {
       clearInterval(check);
       boot();
     }
-  }, 50);
+  }, 20);
 }
