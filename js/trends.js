@@ -100,13 +100,10 @@ function InsightCard({ ins, data, viz }) {
 
 // ── Trends ────────────────────────────────────────────────────────────────────
 
-function Trends({ resolvedStats, loading, weaponData, squadData, heatmapData }) {
-  const [insights, setInsights] = useState(null);
+function Trends({ resolvedStats, loading, weaponData, squadData, heatmapData, analysisData }) {
+  // analysisData is computed in App from resolvedStats — same source of truth as all other tabs
+  const insights = analysisData;
   const isMobile = useIsMobile();
-
-  useEffect(() => {
-    api.get('/api/analysis').then(d => { if (d.insights?.length) setInsights(d); }).catch(() => {});
-  }, []);
 
   const players = useMemo(() => {
     if (!resolvedStats?.length) return [];

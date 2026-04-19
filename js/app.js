@@ -16,7 +16,6 @@ function App() {
   const [squadData, setSquadData] = useState(null);
   const [lifetimeData, setLifetimeData] = useState(null);
   const [heatmapData, setHeatmapData]   = useState(null);
-  const [analysisData, setAnalysisData] = useState(null);
   const [seasonMismatch, setSeasonMismatch] = useState(false);
   const [loading, setLoading]   = useState(true);
   const [error, setError]       = useState(null);
@@ -42,6 +41,9 @@ function App() {
       recent:   historyData?.[entry.member.accountId]?.recent   || [],
     }));
   }, [clanStats, historyData]);
+
+  // ── Analysis computed from resolvedStats — same source of truth as all tabs ─
+  const analysisData = useMemo(() => computeAnalysisFromStats(resolvedStats), [resolvedStats]);
 
   // Settings gate: click logo 10× within 3s to unlock
   const [settingsUnlocked, setSettingsUnlocked] = useState(false);
@@ -125,7 +127,6 @@ function App() {
       api.get('/api/match-history').then(d => setHistoryData(d)).catch(() => {});
       api.get('/api/squad-stats').then(d => setSquadData(d)).catch(() => {});
       api.get('/api/heatmap').then(d => setHeatmapData(d)).catch(() => {});
-      api.get('/api/analysis').then(d => { if (d?.players?.length) setAnalysisData(d); }).catch(() => {});
       api.get('/api/lifetime').then(d => {
         setLifetimeData(d);
         // Detect season rollover: cached stats are from a different season than active
@@ -232,7 +233,7 @@ function App() {
         {tab === 'overview'     && <ErrorBoundary label="Overview"><Overview     members={members}    resolvedStats={resolvedStats} season={currentSeason} loading={loading} onLogoClick={handleLogoClick} /></ErrorBoundary>}
         {tab === 'leaderboard' && <ErrorBoundary label="Leaderboard"><Leaderboard  resolvedStats={resolvedStats} loading={loading} weaponData={weaponData} lifetimeData={lifetimeData} /></ErrorBoundary>}
         {tab === 'players'     && <ErrorBoundary label="Players"><Players      resolvedStats={resolvedStats} loading={loading} weaponData={weaponData} lifetimeData={lifetimeData} analysisData={analysisData} /></ErrorBoundary>}
-        {tab === 'trends'      && <ErrorBoundary label="Trends"><Trends       resolvedStats={resolvedStats} loading={loading} weaponData={weaponData} squadData={squadData} heatmapData={heatmapData} /></ErrorBoundary>}
+        {tab === 'trends'      && <ErrorBoundary label="Trends"><Trends       resolvedStats={resolvedStats} loading={loading} weaponData={weaponData} squadData={squadData} heatmapData={heatmapData} analysisData={analysisData} /></ErrorBoundary>}
         {tab === 'secret_keys' && <ErrorBoundary label="Secret Keys"><SecretKeys /></ErrorBoundary>}
         {tab === 'settings'    && <ErrorBoundary label="Settings"><Settings     members={members}    onMembersChange={onMembersChange} /></ErrorBoundary>}
       </div>

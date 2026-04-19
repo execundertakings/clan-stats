@@ -94,6 +94,151 @@ function getStats(accountId, seasonData, historyData) {
   return extractStats(seasonData);
 }
 
+// ── Client-side analysis (mirrors compute_analysis.js, runs on resolvedStats) ──
+// Using resolvedStats ensures the same cache-preferred data the rest of the UI
+// uses (r.s for core combat stats, r.sApi for API-only fields like boosts/heals).
+function pearsonR(pairs) {
+  const n = pairs.length;
+  if (n < 3) return null;
+  const xs = pairs.map(p => p[0]), ys = pairs.map(p => p[1]);
+  const mx = xs.reduce((a, b) => a + b, 0) / n;
+  const my = ys.reduce((a, b) => a + b, 0) / n;
+  let num = 0, dx2 = 0, dy2 = 0;
+  for (let i = 0; i < n; i++) {
+    const dx = xs[i] - mx, dy = ys[i] - my;
+    num += dx * dy; dx2 += dx * dx; dy2 += dy * dy;
+  }
+  const denom = Math.sqrt(dx2 * dy2);
+  return denom === 0 ? 0 : num / denom;
+}
+function corrStrength(r) {
+  const a = Math.abs(r);
+  return a >= 0.70 ? 'strong' : a >= 0.40 ? 'moderate' : 'weak';
+}
+
+function computeAnalysisFromStats(resolvedStats) {
+  const MIN_GAMES = 5;
+  const players = (resolvedStats || []).map(({ member, s, sApi }) => {
+    if (!s || (s.roundsPlayed || 0) < MIN_GAMES) return null;
+    const games  = s.roundsPlayed;
+    const kills  = s.kills      || 0;
+    const wins   = s.wins       || 0;
+    const top10  = s.top10s     || 0;
+    const hs     = s.headshotKills || 0;
+    const assists= s.assists    || 0;
+    // boosts/heals/longestKill are API-only (zeroed in match cache) — use sApi
+    const boosts = sApi?.boosts      || 0;
+    const heals  = sApi?.heals       || 0;
+    const longestKill = sApi?.longestKill || 0;
+    const losses      = Math.max(games - wins, 1);
+    return {
+      name:          member.name,
+      games,  kills,  wins,  top10,
+      kd:            kills / losses,
+      winRate:       wins  / games,
+      top10Rate:     top10 / games,
+      closeOutRate:  top10 > 0 ? wins / top10 : 0,
+      nearMissRate:  (top10 - wins) / games,
+      hsRate:        kills > 0 ? hs / kills : 0,
+      assistsPg:     assists / games,
+      boostsPg:      boosts  / games,
+      healsPg:       heals   / games,
+      longestKill,
+    };
+  }).filter(Boolean);
+
+  if (players.length < 3) return null;
+
+  const corrDefs = [
+    { key:'hsRateVsWinRate',      label:'HS% vs Win rate',           question:'Does aiming for headshots help you win?',           xs:players.map(p=>p.hsRate),      ys:players.map(p=>p.winRate) },
+    { key:'assistsVsWinRate',     label:'Assists/game vs Win rate',   question:'Does supporting teammates drive wins?',             xs:players.map(p=>p.assistsPg),   ys:players.map(p=>p.winRate) },
+    { key:'boostsVsWinRate',      label:'Boosts/game vs Win rate',    question:'Does using energy items drive wins?',               xs:players.map(p=>p.boostsPg),    ys:players.map(p=>p.winRate) },
+    { key:'top10RateVsWinRate',   label:'Top10 rate vs Win rate',     question:'Does reaching late game convert to wins?',          xs:players.map(p=>p.top10Rate),   ys:players.map(p=>p.winRate) },
+    { key:'closeOutRateVsWinRate',label:'Close-out rate vs Win rate', question:'When in top10, do they seal the deal?',            xs:players.map(p=>p.closeOutRate),ys:players.map(p=>p.winRate) },
+    { key:'activityVsWinRate',    label:'Games played vs Win rate',   question:'Does playing more games improve win rate?',         xs:players.map(p=>p.games),       ys:players.map(p=>p.winRate) },
+    { key:'assistsVsKd',          label:'Assists/game vs K/D',        question:'Do team players also frag well?',                  xs:players.map(p=>p.assistsPg),   ys:players.map(p=>p.kd) },
+    { key:'boostsVsKd',           label:'Boosts/game vs K/D',         question:'Do resource-aware players frag better?',           xs:players.map(p=>p.boostsPg),    ys:players.map(p=>p.kd) },
+    { key:'hsRateVsKd',           label:'HS% vs K/D',                 question:'Do precision aimers have better K/D?',             xs:players.map(p=>p.hsRate),      ys:players.map(p=>p.kd) },
+  ];
+
+  const correlations = {};
+  for (const def of corrDefs) {
+    const pairs = def.xs.map((x, i) => [x, def.ys[i]]).filter(([x, y]) => isFinite(x) && isFinite(y));
+    const r = pairs.length >= 3 ? pearsonR(pairs) : null;
+    correlations[def.key] = {
+      label: def.label, question: def.question, r,
+      direction: r === null ? null : (r > 0 ? 'positive' : 'negative'),
+      strength:  r === null ? null : corrStrength(r),
+      answer:    r === null ? 'unclear' : (Math.abs(r) >= 0.40 ? (r > 0 ? 'yes' : 'no') : 'unclear'),
+    };
+  }
+
+  const playerProfiles = players.map(p => {
+    const tags = [];
+    if      (p.kd >= 1.5)        tags.push('Elite');
+    else if (p.kd >= 1.0)        tags.push('Solid');
+    else                         tags.push('Developing');
+    if (p.winRate  >= 0.10)      tags.push('Clutch');
+    if (p.hsRate   >= 0.25)      tags.push('Precision');
+    if (p.assistsPg >= 0.50)     tags.push('Team Player');
+    if (p.winRate  >= 0.08 && p.kd < 1.0) tags.push('Win-Smart');
+    if (p.closeOutRate >= 0.30)  tags.push('Closer');
+    return { name:p.name, games:p.games, wins:p.wins, top10:p.top10,
+      kd:+p.kd.toFixed(3), winRate:+p.winRate.toFixed(4), top10Rate:+p.top10Rate.toFixed(4),
+      closeOutRate:+p.closeOutRate.toFixed(4), nearMissRate:+p.nearMissRate.toFixed(4),
+      hsRate:+p.hsRate.toFixed(4), assistsPg:+p.assistsPg.toFixed(3),
+      boostsPg:+p.boostsPg.toFixed(3), longestKill:p.longestKill, tags };
+  }).sort((a, b) => b.kd - a.kd);
+
+  const n = players.length;
+  const clan = {
+    activePlayerCount: n,
+    totalGames:   players.reduce((s,p)=>s+p.games,0),
+    totalWins:    players.reduce((s,p)=>s+p.wins,0),
+    avgKd:        +(players.reduce((s,p)=>s+p.kd,0)/n).toFixed(3),
+    avgWinRate:   +(players.reduce((s,p)=>s+p.winRate,0)/n).toFixed(4),
+    avgTop10Rate: +(players.reduce((s,p)=>s+p.top10Rate,0)/n).toFixed(4),
+    avgCloseOut:  +(players.reduce((s,p)=>s+p.closeOutRate,0)/n).toFixed(4),
+    avgHsRate:    +(players.reduce((s,p)=>s+p.hsRate,0)/n).toFixed(4),
+    avgAssistsPg: +(players.reduce((s,p)=>s+p.assistsPg,0)/n).toFixed(3),
+    topKd:        playerProfiles[0]?.name,
+    topWinRate:   [...playerProfiles].sort((a,b)=>b.winRate-a.winRate)[0]?.name,
+    topCloseOut:  [...playerProfiles].sort((a,b)=>b.closeOutRate-a.closeOutRate)[0]?.name,
+    winlessPlayers: players.filter(p=>p.wins===0).map(p=>p.name),
+  };
+
+  const insights = [];
+  const closeOutCorr = correlations.closeOutRateVsWinRate;
+  if (closeOutCorr.r !== null && Math.abs(closeOutCorr.r) >= 0.70)
+    insights.push({ type:'strong_correlation', id:'closeOut', key:'closeOut',
+      text:`Close-out rate is the strongest predictor of win rate (r=${closeOutCorr.r.toFixed(2)}). Reaching top 10 is not enough — converting those finishes into wins is what separates the leaderboard.` });
+
+  const assistsCorr = correlations.assistsVsWinRate;
+  if (assistsCorr.answer === 'yes')
+    insights.push({ type:'team_play', id:'assists', key:'assists',
+      text:`Team play drives wins (r=${assistsCorr.r.toFixed(2)}). The top assist players are also the top fraggers — supporting teammates is not a trade-off.` });
+
+  const hsCorr = correlations.hsRateVsKd;
+  if (hsCorr.r !== null && hsCorr.r < -0.30) {
+    const top2 = playerProfiles.slice(0,2);
+    const avgHsTop2 = top2.reduce((s,p)=>s+p.hsRate,0)/top2.length;
+    insights.push({ type:'counterintuitive', id:'headshots', key:'headshots',
+      text:`High headshot % does not translate to better K/D (r=${hsCorr.r.toFixed(2)}). The top two fraggers average only ${(avgHsTop2*100).toFixed(0)}% headshots — body shot consistency and finishing speed matter more.` });
+  }
+
+  const winlessDecent = players.filter(p=>p.wins===0 && p.kd>=1.0);
+  if (winlessDecent.length > 0)
+    insights.push({ type:'spotlight', id:'winless_fraggers', key:'winless_fraggers',
+      text:`${winlessDecent.map(p=>p.name).join(', ')} ${winlessDecent.length===1?'has':'have'} a K/D above 1.0 but zero wins — solid fighters who aren't closing out late game.` });
+
+  const boostCorr = correlations.boostsVsWinRate;
+  if (boostCorr.r !== null && Math.abs(boostCorr.r) < 0.15)
+    insights.push({ type:'myth_bust', id:'boosts', key:'boosts',
+      text:`Boost usage has no measurable correlation with win rate (r=${boostCorr.r.toFixed(2)}). It reflects play style preference, not effectiveness.` });
+
+  return { computedAt: new Date().toISOString(), playerCount: n, correlations, players: playerProfiles, clan, insights };
+}
+
 // ── Season label ─────────────────────────────────────────────────────────────
 function formatSeason(id) {
   if (!id) return '—';
