@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>[APES] Clan Overlay</title>
+  <style>
+    /* ── OBS Browser Source: recommended 1920×1080, transparent background ── */
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: transparent;
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      color: #fff;
+      overflow: hidden;
+      width: 100vw;
+      height: 100vh;
+    }
+
+    /* ── Query params:
+         ?player=NAME   — show a single player's stats (default: top 5 leaderboard)
+         ?theme=dark    — dark card bg (default: semi-transparent)
+         ?pos=tl|tr|bl|br|c  — corner position (default: tr)
+    ── */
+
+    .overlay {
+      position: absolute;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      min-width: 280px;
+      max-width: 380px;
+      padding: 14px 16px;
+      border-radius: 14px;
+      background: rgba(7, 11, 18, 0.82);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      transition: opacity 0.4s;
+    }
+
+    .overlay.pos-tr { top: 20px; right: 20px; }
+    .overlay.pos-tl { top: 20px; left: 20px; }
+    .overlay.pos-br { bottom: 20px; right: 20px; }
+    .overlay.pos-bl { bottom: 20px; left: 20px; }
+    .overlay.pos-c  { top: 50%; left: 50%; transform: translate(-50%,-50%); }
+
+    .overlay-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+      margin-bottom: 4px;
+    }
+
+    .overlay-logo {
+      font-size: 13px;
+      font-weight: 800;
+      letter-spacing: .08em;
+      color: #60a5fa;
+      text-transform: uppercase;
+    }
+
+    .overlay-season {
+      font-size: 10px;
+      color: rgba(255,255,255,0.4);
+      font-weight: 600;
+    }
+
+    .overlay-refresh {
+      font-size: 9px;
+      color: rgba(255,255,255,0.3);
+    }
+
+    /* ── Leaderboard rows ── */
+    .lb-row {
+      display: grid;
+      grid-template-columns: 18px 1fr 48px 48px 48px;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+      animation: fadeIn .3s ease;
+    }
+    .lb-row:last-child { border-bottom: none; }
+
+    .lb-rank {
+      font-size: 10px;
+      font-weight: 700;
+      color: rgba(255,255,255,0.35);
+      text-align: center;
+    }
+    .lb-rank.gold   { color: #fbbf24; }
+    .lb-rank.silver { color: #94a3b8; }
+    .lb-rank.bronze { color: #b45309; }
+
+    .lb-name {
+      font-size: 12px;
+      font-weight: 700;
+      color: #f1f5f9;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .lb-val {
+      font-size: 11px;
+      font-weight: 700;
+      text-align: right;
+    }
+    .lb-val.kd    { color: #60a5fa; }
+    .lb-val.kills { color: #f87171; }
+    .lb-val.wins  { color: #34d399; }
+
+    .lb-col-header {
+      display: grid;
+      grid-template-columns: 18px 1fr 48px 48px 48px;
+      gap: 6px;
+      padding-bottom: 5px;
+      border-bottom: 1px solid rgba(255,255,255,0.12);
+      margin-bottom: 2px;
+    }
+    .lb-col-label {
+      font-size: 9px;
+      font-weight: 700;
+      color: rgba(255,255,255,0.35);
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      text-align: right;
+    }
+    .lb-col-label:first-child,
+    .lb-col-label:nth-child(2) { text-align: left; }
+
+    /* ── Single player panel ── */
+    .player-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .player-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .player-avatar {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      font-weight: 800;
+      flex-shrink: 0;
+    }
+
+    .player-name {
+      font-size: 16px;
+      font-weight: 800;
+      color: #f1f5f9;
+      line-height: 1.2;
+    }
+    .player-tier {
+      font-size: 11px;
+      font-weight: 600;
+      margin-top: 2px;
+    }
+
+    .player-stats {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 8px;
+    }
+
+    .stat-box {
+      background: rgba(255,255,255,0.05);
+      border-radius: 8px;
+      padding: 8px 10px;
+      text-align: center;
+    }
+    .stat-box-label {
+      font-size: 9px;
+      font-weight: 700;
+      color: rgba(255,255,255,0.4);
+      text-transform: uppercase;
+      letter-spacing: .05em;
+      margin-bottom: 4px;
+    }
+    .stat-box-val {
+      font-size: 18px;
+      font-weight: 800;
+    }
+    .stat-box-sub {
+      font-size: 9px;
+      color: rgba(255,255,255,0.35);
+      margin-top: 2px;
+    }
+
+    /* ── Tier colors ── */
+    .tier-apex    { color: #f87171; }
+    .tier-diamond { color: #818cf8; }
+    .tier-gold    { color: #fbbf24; }
+    .tier-silver  { color: #94a3b8; }
+    .tier-bronze  { color: #d97706; }
+
+    .tier-apex-bg    { background: rgba(248,113,113,.18); border: 1px solid rgba(248,113,113,.4); }
+    .tier-diamond-bg { background: rgba(129,140,248,.18); border: 1px solid rgba(129,140,248,.4); }
+    .tier-gold-bg    { background: rgba(251,191,36,.18);  border: 1px solid rgba(251,191,36,.4); }
+    .tier-silver-bg  { background: rgba(148,163,184,.18); border: 1px solid rgba(148,163,184,.4); }
+    .tier-bronze-bg  { background: rgba(217,119,6,.18);   border: 1px solid rgba(217,119,6,.4); }
+
+    /* ── Session summary ticker ── */
+    .session-bar {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding-top: 8px;
+      border-top: 1px solid rgba(255,255,255,0.08);
+      margin-top: 2px;
+    }
+    .session-label {
+      font-size: 9px;
+      font-weight: 700;
+      color: rgba(255,255,255,0.3);
+      text-transform: uppercase;
+      letter-spacing: .06em;
+    }
+    .session-val {
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    /* ── Pulse animation for live dot ── */
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.3; }
+    }
+    .live-dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: #34d399;
+      animation: pulse 2s ease-in-out infinite;
+      flex-shrink: 0;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(4px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .loading {
+      font-size: 12px;
+      color: rgba(255,255,255,0.4);
+      text-align: center;
+      padding: 16px 0;
+    }
+    .error-msg {
+      font-size: 11px;
+      color: #f87171;
+      text-align: center;
+      padding: 12px 0;
+    }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+
+<script>
+'use strict';
+// ── URL params ────────────────────────────────────────────────────────────────
+const params   = new URLSearchParams(window.location.search);
+const PLAYER   = params.get('player') || null;     // e.g. ?player=Shadowbla
+const POSITION = params.get('pos') || 'tr';        // tl|tr|bl|br|c
+const REFRESH  = parseInt(params.get('refresh') || '60', 10) * 1000; // seconds
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function kd(kills, deaths)  { return deaths > 0 ? (kills / deaths).toFixed(2) : kills.toFixed(2); }
+function pct(n, d)          { return d > 0 ? Math.round(n / d * 100) + '%' : '—'; }
+function fmt(n)             { return Number(n || 0).toLocaleString('en-US'); }
+
+function extractStats(sd) {
+  const gms = sd?.data?.attributes?.gameModeStats;
+  if (!gms) return null;
+  if (gms['squad-fpp']?.roundsPlayed > 0) return gms['squad-fpp'];
+  if (gms['squad']?.roundsPlayed     > 0) return gms['squad'];
+  return null;
+}
+
+function tierInfo(kdVal) {
+  if (kdVal >= 3.0) return { label: '⚡ Apex',    cls: 'tier-apex',    bgCls: 'tier-apex-bg'    };
+  if (kdVal >= 2.0) return { label: '💎 Diamond', cls: 'tier-diamond', bgCls: 'tier-diamond-bg' };
+  if (kdVal >= 1.5) return { label: '🏅 Gold',    cls: 'tier-gold',    bgCls: 'tier-gold-bg'    };
+  if (kdVal >= 1.0) return { label: '🥈 Silver',  cls: 'tier-silver',  bgCls: 'tier-silver-bg'  };
+  return                    { label: '🥉 Bronze',  cls: 'tier-bronze',  bgCls: 'tier-bronze-bg'  };
+}
+
+function initials(name) {
+  return name.slice(0, 2).toUpperCase();
+}
+
+function rankLabel(i) {
+  if (i === 0) return { text: '🥇', cls: 'gold' };
+  if (i === 1) return { text: '🥈', cls: 'silver' };
+  if (i === 2) return { text: '🥉', cls: 'bronze' };
+  return { text: i + 1, cls: '' };
+}
+
+// ── Fetch + render ─────────────────────────────────────────────────────────────
+const root = document.getElementById('root');
+
+async function fetchStats() {
+  const res = await fetch('/api/clan/stats');
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const d = await res.json();
+  // Shape: { stats: [...], seasonId }
+  return { stats: d.stats || [], seasonId: d.seasonId || null };
+}
+
+function renderLeaderboard(stats, seasonId) {
+  // Build rows
+  const rows = stats.map(entry => {
+    const s = extractStats(entry.season);
+    if (!s || !s.roundsPlayed) return null;
+    const kdVal = s.losses ? s.kills / s.losses : s.kills;
+    return {
+      name:    entry.member.name,
+      kdVal,
+      kills:   s.kills  || 0,
+      wins:    s.wins   || 0,
+      games:   s.roundsPlayed,
+    };
+  }).filter(Boolean).sort((a, b) => b.kdVal - a.kdVal).slice(0, 5);
+
+  if (!rows.length) return '<div class="loading">No stats yet</div>';
+
+  const shortSeason = seasonId ? seasonId.split('.').pop() : '?';
+
+  const colHeaders = `
+    <div class="lb-col-header">
+      <span class="lb-col-label">#</span>
+      <span class="lb-col-label">Player</span>
+      <span class="lb-col-label">K/D</span>
+      <span class="lb-col-label">Kills</span>
+      <span class="lb-col-label">Wins</span>
+    </div>`;
+
+  const rowHtml = rows.map((r, i) => {
+    const rank = rankLabel(i);
+    return `
+      <div class="lb-row">
+        <span class="lb-rank ${rank.cls}">${rank.text}</span>
+        <span class="lb-name">${r.name}</span>
+        <span class="lb-val kd">${r.kdVal.toFixed(2)}</span>
+        <span class="lb-val kills">${fmt(r.kills)}</span>
+        <span class="lb-val wins">${r.wins}</span>
+      </div>`;
+  }).join('');
+
+  return `
+    <div class="overlay-header">
+      <span class="overlay-logo">🦍 APES</span>
+      <span class="overlay-season">Season ${shortSeason}</span>
+      <span style="display:flex;align-items:center;gap:5px"><div class="live-dot"></div><span class="overlay-refresh">LIVE</span></span>
+    </div>
+    ${colHeaders}
+    ${rowHtml}`;
+}
+
+function renderPlayer(stats, target, seasonId) {
+  const entry = stats.find(e => e.member.name.toLowerCase() === target.toLowerCase())
+             || stats.find(e => e.member.name.toLowerCase().includes(target.toLowerCase()));
+  if (!entry) return `<div class="error-msg">Player "${target}" not found</div>`;
+
+  const s     = extractStats(entry.season);
+  if (!s) return `<div class="error-msg">No stats for ${entry.member.name}</div>`;
+
+  const kdVal  = s.losses ? s.kills / s.losses : s.kills;
+  const tier   = tierInfo(kdVal);
+  const avgDmg = s.roundsPlayed ? Math.round(s.damageDealt / s.roundsPlayed) : 0;
+  const hsRate = s.kills ? Math.round(s.headshotKills / s.kills * 100) : 0;
+  const winRate = s.roundsPlayed ? Math.round(s.wins / s.roundsPlayed * 100) : 0;
+  const shortSeason = seasonId ? seasonId.split('.').pop() : '?';
+
+  return `
+    <div class="overlay-header">
+      <span class="overlay-logo">🦍 APES</span>
+      <span class="overlay-season">Season ${shortSeason}</span>
+      <span style="display:flex;align-items:center;gap:5px"><div class="live-dot"></div><span class="overlay-refresh">LIVE</span></span>
+    </div>
+    <div class="player-panel">
+      <div class="player-header">
+        <div class="player-avatar ${tier.bgCls}">
+          <span class="${tier.cls}">${initials(entry.member.name)}</span>
+        </div>
+        <div>
+          <div class="player-name">${entry.member.name}</div>
+          <div class="player-tier ${tier.cls}">${tier.label}</div>
+        </div>
+      </div>
+      <div class="player-stats">
+        <div class="stat-box">
+          <div class="stat-box-label">K/D</div>
+          <div class="stat-box-val ${tier.cls}">${kdVal.toFixed(2)}</div>
+          <div class="stat-box-sub">${fmt(s.kills)} kills</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-box-label">Win Rate</div>
+          <div class="stat-box-val" style="color:#34d399">${winRate}%</div>
+          <div class="stat-box-sub">${s.wins} wins / ${fmt(s.roundsPlayed)}g</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-box-label">Avg Dmg</div>
+          <div class="stat-box-val" style="color:#fbbf24">${fmt(avgDmg)}</div>
+          <div class="stat-box-sub">${hsRate}% HS</div>
+        </div>
+      </div>
+      <div class="session-bar">
+        <span class="session-label">Top-10</span>
+        <span class="session-val" style="color:#60a5fa">${pct(s.top10s || 0, s.roundsPlayed)}</span>
+        <span class="session-label" style="margin-left:6px">Revives/g</span>
+        <span class="session-val" style="color:#a78bfa">${s.roundsPlayed ? (s.revives / s.roundsPlayed).toFixed(2) : '—'}</span>
+        <span class="session-label" style="margin-left:6px">Longest</span>
+        <span class="session-val" style="color:#94a3b8">${Math.round(s.longestKill || 0)}m</span>
+      </div>
+    </div>`;
+}
+
+async function render() {
+  root.innerHTML = `<div class="overlay pos-${POSITION}"><div class="loading">Loading…</div></div>`;
+  try {
+    const { stats, seasonId } = await fetchStats();
+    const inner = PLAYER
+      ? renderPlayer(stats, PLAYER, seasonId)
+      : renderLeaderboard(stats, seasonId);
+    root.innerHTML = `<div class="overlay pos-${POSITION}">${inner}</div>`;
+  } catch (e) {
+    root.innerHTML = `<div class="overlay pos-${POSITION}"><div class="error-msg">⚠ ${e.message}</div></div>`;
+  }
+}
+
+// Initial render + auto-refresh
+render();
+setInterval(render, REFRESH);
+</script>
+</body>
+</html>

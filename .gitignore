@@ -1,11 +1,17 @@
 # Environment / secrets
 .env
 
-# Runtime data (not source)
-data/members.json
-data/clan.json
-data/scraped_members.json
-data/scrape.log
+# Runtime data / caches (not source)
+data/
+# Keep member list and clan config tracked
+!data/members.json
+!data/clan.json
+
+# Cowork internal
+.claude/
+
+# Backup files
+*.bak
 
 # Logs
 *.log

@@ -2,19 +2,21 @@
 // ── routes/matches.js — recent match history for clan members ─────────────────
 
 const { jsonRes, errRes } = require('../lib/http');
-const { getPlayer, getMatch } = require('../lib/pubg');
+const { getPlayer, getMatch, getPlayerFresh } = require('../lib/pubg');
 
 async function handleMatches(req, res, url) {
   const { pathname, searchParams } = url;
 
-  // GET /api/matches/player?accountId=...&limit=5 — recent matches for one player
+  // GET /api/matches/player?accountId=...&limit=5[&bust=1] — recent matches for one player
+  // bust=1 bypasses the player disk cache so new matches show immediately
   if (req.method === 'GET' && pathname === '/api/matches/player') {
     const accountId = searchParams.get('accountId');
     const limit     = Math.min(parseInt(searchParams.get('limit') || '5', 10), 10);
+    const bust      = searchParams.get('bust') === '1';
     if (!accountId) return errRes(res, 'accountId required');
 
     try {
-      const playerData = await getPlayer(accountId);
+      const playerData = bust ? await getPlayerFresh(accountId) : await getPlayer(accountId);
       const matchRefs  = (playerData.data.relationships.matches.data || []).slice(0, limit);
 
       // Fetch each match in parallel
