@@ -116,6 +116,10 @@
     #bg-canvas { position:fixed;top:0;left:0;width:100%;height:100%;z-index:0;pointer-events:none; }
     #root { position:relative;z-index:1; }
 
+    /* Icon sizing — defined here so it never depends on Tailwind purge */
+    .app-icon    { width:16px;height:16px;flex-shrink:0;display:block; }
+    .app-icon-sm { width:14px;height:14px; }
+
     /* Stat card clickable hover */
     .stat-card-click { cursor:pointer; }
     .stat-card-click:hover { border-color:var(--accent) !important; transform:translateY(-1px); box-shadow:0 4px 24px rgba(59,130,246,.12); }
