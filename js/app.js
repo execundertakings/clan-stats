@@ -43,38 +43,50 @@ function App() {
       const assists    = s?.assists       || 0;
       const dmg        = s?.damageDealt   || 0;
       const timeSurv   = s?.timeSurvived  || 0;
+      // Cache-tracked fields (accurate from both cache and API)
       const boosts     = sApi?.boosts     || 0;
       const heals      = sApi?.heals      || 0;
+      // API-only fields — zeroed in match cache; always read from sApi
+      const revives         = sApi?.revives          || 0;
+      const roadKills       = sApi?.roadKills         || 0;
+      const vehicleDestroys = sApi?.vehicleDestroys   || 0;
+      const days            = sApi?.days              || 0;
+      const longestKill     = sApi?.longestKill       || 0;
+      const streak          = sApi?.maxKillStreaks    || 0;
+      const distance        = (sApi?.walkDistance || 0) + (sApi?.rideDistance || 0) + (sApi?.swimDistance || 0);
 
-      const kdVal       = kills / Math.max(losses, 1);
-      const winRate     = games > 0 ? wins  / games  : 0;
-      const top10Rate   = games > 0 ? top10 / games  : 0;
-      const closeOutRate = top10 > 0 ? wins  / top10 : 0;
+      const kdVal        = kills / Math.max(losses, 1);
+      const winRate      = games > 0 ? wins  / games  : 0;
+      const top10Rate    = games > 0 ? top10 / games  : 0;
+      const closeOutRate = top10 > 0 ? wins  / top10  : 0;
       const nearMissRate = games > 0 ? (top10 - wins) / games : 0;
-      const hsRate      = kills > 0 ? hs / kills : 0;
-      const avgDmg      = games > 0 ? dmg / games      : 0;
-      const avgSurvival = games > 0 ? timeSurv / games : 0;
-      const killsPg     = games > 0 ? kills   / games  : 0;
-      const assistsPg   = games > 0 ? assists / games  : 0;
-      const boostsPg    = games > 0 ? boosts  / games  : 0;
-      const healsPg     = games > 0 ? heals   / games  : 0;
-      const dmgPerKill  = kills > 3  ? dmg / kills     : null;
-      // OVR score formula: K/D (×50) + Avg Dmg (×30) + Win Rate (×20)
-      const score       = Math.round((kdVal / 3) * 50 + (avgDmg / 400) * 30 + winRate * 20);
+      const hsRate       = kills > 0 ? hs / kills     : 0;
+      const avgDmg       = games > 0 ? dmg / games      : 0;
+      const avgSurvival  = games > 0 ? timeSurv / games : 0;
+      const killsPg      = games > 0 ? kills   / games  : 0;
+      const assistsPg    = games > 0 ? assists / games  : 0;
+      const boostsPg     = games > 0 ? boosts  / games  : 0;
+      const healsPg      = games > 0 ? heals   / games  : 0;
+      const dmgPerKill   = kills > 3  ? dmg / kills     : null;
+      const score        = computeScore(kdVal, avgDmg, winRate); // shared formula
 
       return {
         member:   entry.member,
         s,
         sApi,
         lt:       extractLifetimeStats(entry.lifetime), // pre-resolved lifetime
-        season:   entry.season,    // raw — needed by PlayerCard / archive rows
-        lifetime: entry.lifetime,  // raw — needed by PlayerCard
+        season:   entry.season,    // raw — needed by FPP/TPP detection
+        lifetime: entry.lifetime,  // raw
         seasonId: entry.seasonId,
         form:     historyData?.[entry.member.accountId]?.form     || null,
         mapStats: historyData?.[entry.member.accountId]?.mapStats || null,
         recent:   historyData?.[entry.member.accountId]?.recent   || [],
-        // ── Derived metrics (pre-computed — do not recompute in components) ──
-        games, kills, wins, top10, losses, hs, assists, dmg, timeSurv, boosts, heals,
+        // ── Pre-computed fields — components must not re-derive these ──
+        // Raw counts (cache-accurate)
+        games, kills, wins, top10, losses, hs, assists, dmg, timeSurv,
+        // API-only counts (from sApi — zero in cache, real value here)
+        boosts, heals, revives, roadKills, vehicleDestroys, days, longestKill, streak, distance,
+        // Derived rates
         kdVal, winRate, top10Rate, closeOutRate, nearMissRate,
         hsRate, avgDmg, avgSurvival,
         killsPg, assistsPg, boostsPg, healsPg, dmgPerKill,

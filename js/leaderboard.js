@@ -145,7 +145,7 @@ function Leaderboard({ resolvedStats, loading, weaponData, lifetimeData }) {
         if (!s) return null;
         return {
           name:          member.name,
-          score:         (() => { const kdV = (s.kills||0)/Math.max(s.losses||1,1); const avgDmg = s.roundsPlayed ? (s.damageDealt||0)/s.roundsPlayed : 0; const wr = s.roundsPlayed ? (s.wins||0)/s.roundsPlayed : 0; return Math.round((kdV/3)*50 + (avgDmg/400)*30 + wr*20); })(),
+          score:         computeScore((s.kills||0)/Math.max(s.losses||1,1), s.roundsPlayed?(s.damageDealt||0)/s.roundsPlayed:0, s.roundsPlayed?(s.wins||0)/s.roundsPlayed:0),
           kills:         s?.kills || 0,
           deaths:        s?.losses || 0,
           wins:          s?.wins || 0,

@@ -12,16 +12,20 @@ function initials(name) {
 }
 
 // ── PlayerCard — individual player card with inline match expansion ────────────
-function PlayerCard({ member, sd, ld, resolvedS, lt, seasonError, kdVal, avgDmg, score, winRate, hsRate, avgSurvival, weaponEntry, historyEntry, lifetimeEntry, onViewProfile }) {
+function PlayerCard({ entry, seasonError, weaponEntry, historyEntry, lifetimeEntry, onViewProfile }) {
   const [expanded, setExpanded]         = useState(false);
   const [matches, setMatches]           = useState(null);
   const [matchLoading, setMatchLoading] = useState(false);
   const [matchError, setMatchError]     = useState(null);
 
-  // Use pre-resolved cache-preferred stats from trunk — no re-derivation
-  const s    = resolvedS;
-  const l    = lt;
-  const tier = playerTier(kdVal || 0);
+  // Destructure everything from the trunk entry — never re-derive
+  const { member, s, lt: l, season: sd,
+    kdVal, avgDmg, score, winRate, hsRate, avgSurvival, top10Rate,
+    kills, wins, games, top10, assists, hs,
+    revives, boosts, heals, longestKill, streak, vehicleDestroys, roadKills, days,
+  } = entry;
+
+  const tier  = playerTier(kdVal || 0);
   const isTPP = !!(sd?.data?.attributes?.gameModeStats?.['squad']?.roundsPlayed > 0 &&
                   !(sd?.data?.attributes?.gameModeStats?.['squad-fpp']?.roundsPlayed > 0));
 
@@ -170,24 +174,24 @@ function PlayerCard({ member, sd, ld, resolvedS, lt, seasonError, kdVal, avgDmg,
             {/* Stat grid */}
             <div className="player-stat-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
               {[
-                { label: 'Kills',      val: num(s.kills || 0) },
-                { label: 'Wins',       val: num(s.wins || 0),                                                    color: s.wins > 0 ? '#f59e0b' : undefined },
-                { label: 'Avg Dmg',    val: num(avgDmg),        tip: 'Average damage per match' },
-                { label: 'Best Game',  val: `${num(s.roundMostKills || 0)}K`,                                    color: (s.roundMostKills||0) >= 10 ? '#4ade80' : undefined, tip: 'Most kills in a single match' },
-                { label: 'Matches',    val: num(s.roundsPlayed || 0) },
-                { label: 'Revives',    val: num(s.revives || 0),                                                 color: (s.revives||0) >= 10 ? '#60a5fa' : undefined, tip: 'Teammate revives this season' },
-                { label: 'HS %',       val: (hsRate||0) > 0 ? (hsRate * 100).toFixed(1) + '%' : '—', tip: 'Headshot kill percentage' },
-                { label: 'Avg Survive',val: fmtSurvival(avgSurvival || 0), tip: 'Average time survived per match' },
-                { label: 'Knockdowns', val: num(s.dBNOs || 0),  tip: 'Down But Not Out — enemies knocked but not finished' },
-                { label: 'Top 10',     val: num(s.top10s || 0), tip: 'Number of top-10 finishes' },
-                { label: 'Streak',     val: `${num(s.maxKillStreaks || 0)}`,                                     color: (s.maxKillStreaks||0) >= 5 ? '#facc15' : undefined, tip: 'Highest kill streak in a single match' },
-                { label: 'Longest K',  val: `${Math.round(s.longestKill || 0)}m`, tip: 'Longest kill distance in metres' },
-                { label: 'Assists',    val: num(s.assists || 0),                                                 color: (s.assists||0) >= 20 ? '#60a5fa' : undefined, tip: 'Damage dealt to enemies finished by a teammate' },
-                { label: 'Boosts',     val: num(s.boosts || 0),                                                  color: (s.boosts||0) >= 50 ? '#34d399' : undefined, tip: 'Boost items used (energy drinks, painkillers)' },
-                { label: 'Heals',      val: num(s.heals || 0),                                                   color: (s.heals||0) >= 50 ? '#34d399' : undefined, tip: 'Healing items used (medkits, bandages)' },
-                { label: 'Veh Destr',  val: num(s.vehicleDestroys || 0),                                         color: (s.vehicleDestroys||0) >= 3 ? '#f97316' : undefined, tip: 'Vehicles destroyed' },
-                { label: 'Road Kills', val: num(s.roadKills || 0),                                               color: (s.roadKills||0) >= 1 ? '#ef4444' : undefined, tip: 'Enemies run over with a vehicle' },
-                { label: 'Days',       val: num(s.days || 0),                                                    color: (s.days||0) >= 10 ? '#a78bfa' : undefined, tip: 'Days played this season' },
+                { label: 'Kills',      val: num(kills) },
+                { label: 'Wins',       val: num(wins),        color: wins > 0 ? '#f59e0b' : undefined },
+                { label: 'Avg Dmg',    val: num(Math.round(avgDmg)), tip: 'Average damage per match' },
+                { label: 'Best Game',  val: `${num(s?.roundMostKills || 0)}K`, color: (s?.roundMostKills||0) >= 10 ? '#4ade80' : undefined, tip: 'Most kills in a single match' },
+                { label: 'Matches',    val: num(games) },
+                { label: 'Revives',    val: num(revives),     color: revives >= 10 ? '#60a5fa' : undefined, tip: 'Teammate revives this season' },
+                { label: 'HS %',       val: hsRate > 0 ? (hsRate * 100).toFixed(1) + '%' : '—', tip: 'Headshot kill percentage' },
+                { label: 'Avg Survive',val: fmtSurvival(avgSurvival), tip: 'Average time survived per match' },
+                { label: 'Knockdowns', val: num(s?.dBNOs || 0), tip: 'Down But Not Out — enemies knocked but not finished' },
+                { label: 'Top 10',     val: num(top10), tip: 'Number of top-10 finishes' },
+                { label: 'Streak',     val: num(streak),      color: streak >= 5 ? '#facc15' : undefined, tip: 'Highest kill streak in a single match' },
+                { label: 'Longest K',  val: `${Math.round(longestKill)}m`, tip: 'Longest kill distance in metres' },
+                { label: 'Assists',    val: num(assists),     color: assists >= 20 ? '#60a5fa' : undefined, tip: 'Damage dealt to enemies finished by a teammate' },
+                { label: 'Boosts',     val: num(boosts),      color: boosts >= 50 ? '#34d399' : undefined, tip: 'Boost items used (energy drinks, painkillers)' },
+                { label: 'Heals',      val: num(heals),       color: heals >= 50 ? '#34d399' : undefined, tip: 'Healing items used (medkits, bandages)' },
+                { label: 'Veh Destr',  val: num(vehicleDestroys), color: vehicleDestroys >= 3 ? '#f97316' : undefined, tip: 'Vehicles destroyed' },
+                { label: 'Road Kills', val: num(roadKills),   color: roadKills >= 1 ? '#ef4444' : undefined, tip: 'Enemies run over with a vehicle' },
+                { label: 'Days',       val: num(days),        color: days >= 10 ? '#a78bfa' : undefined, tip: 'Days played this season' },
               ].map(({ label, val, color, tip }) => (
                 <div key={label}>
                   <div style={{ color: 'var(--text-3)', fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em' }}>
@@ -366,13 +370,16 @@ function PlayerCard({ member, sd, ld, resolvedS, lt, seasonError, kdVal, avgDmg,
 }
 
 // ── Player Profile Modal ──────────────────────────────────────────────────────
-function PlayerProfileModal({ member, sd, ld, resolvedS, kdVal: kdValProp, avgDmg: avgDmgProp, score: scoreProp, winRate: winRateProp, hsRate: hsRateProp, avgSurvival: avgSurvivalProp, weaponEntry, historyEntry, lifetimeEntry, analysisProfile, onClose }) {
+function PlayerProfileModal({ entry, weaponEntry, historyEntry, lifetimeEntry, analysisProfile, onClose }) {
   const [activeTab, setActiveTab] = useState('overview');
 
-  // Use pre-resolved stats and pre-computed derived metrics from trunk — no re-derivation
-  const s      = resolvedS;
-  const kdVal  = kdValProp  || 0;
-  const tier   = playerTier(kdVal);
+  // Destructure everything from the trunk entry — never re-derive
+  const { member, s, season: sd,
+    kdVal, avgDmg, winRate, hsRate, avgSurvival, top10Rate,
+    kills, wins, games, top10, losses, assists, revives, longestKill,
+  } = entry;
+
+  const tier = playerTier(kdVal || 0);
 
   const APE_IMGS = [
     '/images/ape1.png', '/images/ape2.png', '/images/ape3.png',
@@ -384,19 +391,13 @@ function PlayerProfileModal({ member, sd, ld, resolvedS, kdVal: kdValProp, avgDm
   const nameHash = member.name.split('').reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 0);
   const imgSrc   = APE_IMGS[Math.abs(nameHash) % APE_IMGS.length];
 
-  // Season stats — all derived values come from trunk props, raw counts from s directly
+  // Season stats object — all derived values from trunk, raw counts from trunk
   const season = s ? {
-    games:     s.roundsPlayed || 0,
-    kills:     s.kills        || 0,
-    deaths:    s.losses       || 0,
-    kd:        kdValProp      || 0,
-    wins:      s.wins         || 0,
-    winRate:   winRateProp    || 0,
-    top10Rate: s.roundsPlayed ? (s.top10s || 0) / s.roundsPlayed : 0,
-    avgDmg:    avgDmgProp     || 0,
-    hsRate:    hsRateProp     || 0,   // pre-computed from trunk
-    revivesPg: s.roundsPlayed ? ((s.revives || 0) / s.roundsPlayed).toFixed(2) : '0',
-    longestKill: Math.round(s.longestKill || 0),
+    games,    kills,    deaths: losses,
+    kd:       kdVal,    wins,   winRate,    top10Rate,
+    avgDmg,   hsRate,
+    revivesPg: games > 0 ? (revives / games).toFixed(2) : '0', // revives from sApi via trunk
+    longestKill: Math.round(longestKill),                        // from sApi via trunk
   } : null;
 
   // Squad chemistry from recent match history
@@ -780,30 +781,31 @@ function Players({ resolvedStats, loading, weaponData, lifetimeData, analysisDat
         </div>
       </div>
       <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4" style={{ alignItems: 'start' }}>
-        {sortedStats.map(({ member, s, lt, season: sd, lifetime: ld, form, mapStats, recent, seasonError, kdVal, avgDmg, score, winRate, hsRate, avgSurvival }) => {
-          const historyEntry = { form, mapStats, recent };
+        {sortedStats.map(entry => {
+          const { member, form, mapStats, recent } = entry;
+          const historyEntry  = { form, mapStats, recent };
+          const weaponEntry   = weaponData?.[member.accountId];
+          const lifetimeEntry = lifetimeData?.players?.[member.accountId];
           return (
             <PlayerCard
               key={member.accountId}
-              member={member} sd={sd} ld={ld} resolvedS={s} lt={lt} seasonError={seasonError}
-              kdVal={kdVal} avgDmg={avgDmg} score={score} winRate={winRate} hsRate={hsRate} avgSurvival={avgSurvival}
-              weaponEntry={weaponData?.[member.accountId]}
+              entry={entry}
+              seasonError={entry.seasonError}
+              weaponEntry={weaponEntry}
               historyEntry={historyEntry}
-              lifetimeEntry={lifetimeData?.players?.[member.accountId]}
-              onViewProfile={() => setProfileTarget({ member, sd, ld, resolvedS: s,
-                kdVal, avgDmg, score, winRate, hsRate, avgSurvival,
-                weaponEntry:  weaponData?.[member.accountId],
-                historyEntry,
-                lifetimeEntry: lifetimeData?.players?.[member.accountId],
-              })}
+              lifetimeEntry={lifetimeEntry}
+              onViewProfile={() => setProfileTarget({ entry, weaponEntry, historyEntry, lifetimeEntry })}
             />
           );
         })}
       </div>
       {profileTarget && (
         <PlayerProfileModal
-          {...profileTarget}
-          analysisProfile={analysisData?.players?.find(p => p.name.toLowerCase() === profileTarget.member.name.toLowerCase()) || null}
+          entry={profileTarget.entry}
+          weaponEntry={profileTarget.weaponEntry}
+          historyEntry={profileTarget.historyEntry}
+          lifetimeEntry={profileTarget.lifetimeEntry}
+          analysisProfile={analysisData?.players?.find(p => p.name.toLowerCase() === profileTarget.entry.member.name.toLowerCase()) || null}
           onClose={() => setProfileTarget(null)}
         />
       )}

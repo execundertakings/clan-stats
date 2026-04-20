@@ -103,6 +103,13 @@ function getStats(accountId, seasonData, historyData) {
   return extractStats(seasonData);
 }
 
+// ── Shared scoring formula ────────────────────────────────────────────────────
+// Single definition used by the app.js trunk AND leaderboard archive rows.
+// K/D (×50) + Avg Dmg (×30) + Win Rate (×20). Keep in sync with LB_COLS title.
+function computeScore(kdVal, avgDmg, winRate) {
+  return Math.round((kdVal / 3) * 50 + (avgDmg / 400) * 30 + winRate * 20);
+}
+
 // ── Client-side analysis (mirrors compute_analysis.js, runs on resolvedStats) ──
 // Using resolvedStats ensures the same cache-preferred data the rest of the UI
 // uses (r.s for core combat stats, r.sApi for API-only fields like boosts/heals).

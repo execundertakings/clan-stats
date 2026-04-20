@@ -249,23 +249,25 @@ function Overview({ members, resolvedStats, season, loading, onLogoClick }) {
     let kills = 0, deaths = 0, wins = 0, matches = 0, damage = 0, top10 = 0,
         assists = 0, headshots = 0, timeSurvived = 0, revives = 0, dBNOs = 0,
         roadKills = 0, vehicleDestroys = 0, daysPlayed = 0, activePlayers = 0;
-    resolvedStats.forEach(({ s }) => {
-      if (!s) return;
-      kills           += s.kills           || 0;
-      deaths          += s.losses          || 0;
-      wins            += s.wins            || 0;
-      matches         += s.roundsPlayed    || 0;
-      damage          += s.damageDealt     || 0;
-      top10           += s.top10s          || 0;
-      assists         += s.assists         || 0;
-      headshots       += s.headshotKills   || 0;
-      timeSurvived    += s.timeSurvived    || 0;
-      revives         += s.revives         || 0;
-      dBNOs           += s.dBNOs           || 0;
-      roadKills       += s.roadKills       || 0;
-      vehicleDestroys += s.vehicleDestroys || 0;
-      daysPlayed      += s.days            || 0;
-      if ((s.roundsPlayed || 0) > 0) activePlayers++;
+    // Read all fields from the trunk — API-only fields (revives, roadKills, vehicleDestroys,
+    // days) come from sApi via the trunk and are correct even when cache is active.
+    resolvedStats.forEach(r => {
+      if (!r.s) return;
+      kills           += r.kills;
+      deaths          += r.losses;
+      wins            += r.wins;
+      matches         += r.games;
+      damage          += r.dmg;
+      top10           += r.top10;
+      assists         += r.assists;
+      headshots       += r.hs;
+      timeSurvived    += r.timeSurv;
+      revives         += r.revives;         // sApi via trunk — correct when cache active
+      dBNOs           += r.s.dBNOs  || 0;  // cache-tracked, fine from s
+      roadKills       += r.roadKills;       // sApi via trunk
+      vehicleDestroys += r.vehicleDestroys; // sApi via trunk
+      daysPlayed      += r.days;            // sApi via trunk
+      if (r.games > 0) activePlayers++;
     });
     return { kills, deaths, wins, matches, damage, top10, assists, headshots,
              timeSurvived, revives, dBNOs, roadKills, vehicleDestroys, daysPlayed, activePlayers };
@@ -285,9 +287,9 @@ function Overview({ members, resolvedStats, season, loading, onLogoClick }) {
       top10:     best(r => r.top10Rate),
       headshot:  best(r => r.hsRate),
       survive:   best(r => r.avgSurvival),
-      teamwork:  best(r => r.s.revives   || 0),
+      teamwork:  best(r => r.revives),    // sApi via trunk
       assists:   best(r => r.assists),
-      roadKills: best(r => r.s.roadKills || 0),
+      roadKills: best(r => r.roadKills),  // sApi via trunk
     };
   }, [resolvedStats]);
 
@@ -373,9 +375,9 @@ function Overview({ members, resolvedStats, season, loading, onLogoClick }) {
                 { label: 'Top 10 Rate',    r: bests.top10,     val: r => pct(r.top10||0, r.games||1) },
                 { label: 'HS Accuracy',    r: bests.headshot,  val: r => pct(r.hs||0, r.kills||1) },
                 { label: 'Avg Survival',   r: bests.survive,   val: r => fmtSurvival(r.avgSurvival||0) },
-                { label: 'Teamwork',       r: bests.teamwork,  val: r => `${num(r.s?.revives||0)} revs` },
+                { label: 'Teamwork',       r: bests.teamwork,  val: r => `${num(r.revives||0)} revs` },
                 { label: 'Most Assists',   r: bests.assists,   val: r => num(r.assists||0) },
-                { label: 'Road Kills',     r: bests.roadKills, val: r => num(r.s?.roadKills||0) },
+                { label: 'Road Kills',     r: bests.roadKills, val: r => num(r.roadKills||0) },
               ].filter(c => c.r).map(({ label, r, val }) => (
                 <div key={label} style={{ minWidth: 90 }}>
                   <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: 'var(--text-3)', marginBottom: 2 }}>{label}</div>
