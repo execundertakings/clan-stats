@@ -46,6 +46,15 @@ function extractStats(seasonData, mode = 'squad') {
   const tpp = attrs[mode];
   if (fpp?.roundsPlayed > 0) return fpp;
   if (tpp?.roundsPlayed > 0) return tpp;
+  // No squad games found — player may play duo or solo exclusively.
+  // Aggregate all available modes so we never show zeros for active players.
+  const totals = {};
+  for (const modeStats of Object.values(attrs)) {
+    for (const [key, val] of Object.entries(modeStats)) {
+      if (typeof val === 'number') totals[key] = (totals[key] || 0) + val;
+    }
+  }
+  if (totals.roundsPlayed > 0) return totals;
   return fpp || tpp || null;
 }
 

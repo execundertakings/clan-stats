@@ -12,14 +12,15 @@ function initials(name) {
 }
 
 // ── PlayerCard — individual player card with inline match expansion ────────────
-function PlayerCard({ member, sd, ld, seasonError, weaponEntry, historyEntry, lifetimeEntry, onViewProfile }) {
+function PlayerCard({ member, sd, ld, resolvedS, lt, seasonError, weaponEntry, historyEntry, lifetimeEntry, onViewProfile }) {
   const [expanded, setExpanded]         = useState(false);
   const [matches, setMatches]           = useState(null);
   const [matchLoading, setMatchLoading] = useState(false);
   const [matchError, setMatchError]     = useState(null);
 
-  const s      = extractStats(sd);
-  const l      = extractLifetimeStats(ld);
+  // Use pre-resolved cache-preferred stats — never call extractStats directly
+  const s      = resolvedS;
+  const l      = lt;
   const kdVal  = s ? s.kills / Math.max(s.losses || 1, 1) : 0;
   const tier   = playerTier(kdVal);
   const isTPP  = !!(sd?.data?.attributes?.gameModeStats?.['squad']?.roundsPlayed > 0 &&
@@ -370,8 +371,8 @@ function PlayerCard({ member, sd, ld, seasonError, weaponEntry, historyEntry, li
 function PlayerProfileModal({ member, sd, ld, resolvedS, weaponEntry, historyEntry, lifetimeEntry, analysisProfile, onClose }) {
   const [activeTab, setActiveTab] = useState('overview');
 
-  // Prefer cache-computed official-only stats; fall back to raw API if not available
-  const s      = resolvedS || extractStats(sd);
+  // Always use pre-resolved cache-preferred stats from resolvedStats — never re-extract
+  const s      = resolvedS;
   const kdVal  = s ? (s.kills || 0) / Math.max(s.losses || 1, 1) : 0;
   const tier   = playerTier(kdVal);
 
@@ -782,12 +783,12 @@ function Players({ resolvedStats, loading, weaponData, lifetimeData, analysisDat
         </div>
       </div>
       <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4" style={{ alignItems: 'start' }}>
-        {sortedStats.map(({ member, s, season: sd, lifetime: ld, form, mapStats, recent, seasonError }) => {
+        {sortedStats.map(({ member, s, lt, season: sd, lifetime: ld, form, mapStats, recent, seasonError }) => {
           const historyEntry = { form, mapStats, recent };
           return (
             <PlayerCard
               key={member.accountId}
-              member={member} sd={sd} ld={ld} seasonError={seasonError}
+              member={member} sd={sd} ld={ld} resolvedS={s} lt={lt} seasonError={seasonError}
               weaponEntry={weaponData?.[member.accountId]}
               historyEntry={historyEntry}
               lifetimeEntry={lifetimeData?.players?.[member.accountId]}
