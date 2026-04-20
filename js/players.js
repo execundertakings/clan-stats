@@ -12,20 +12,18 @@ function initials(name) {
 }
 
 // ── PlayerCard — individual player card with inline match expansion ────────────
-function PlayerCard({ member, sd, ld, resolvedS, lt, seasonError, weaponEntry, historyEntry, lifetimeEntry, onViewProfile }) {
+function PlayerCard({ member, sd, ld, resolvedS, lt, seasonError, kdVal, avgDmg, score, winRate, hsRate, avgSurvival, weaponEntry, historyEntry, lifetimeEntry, onViewProfile }) {
   const [expanded, setExpanded]         = useState(false);
   const [matches, setMatches]           = useState(null);
   const [matchLoading, setMatchLoading] = useState(false);
   const [matchError, setMatchError]     = useState(null);
 
-  // Use pre-resolved cache-preferred stats — never call extractStats directly
-  const s      = resolvedS;
-  const l      = lt;
-  const kdVal  = s ? s.kills / Math.max(s.losses || 1, 1) : 0;
-  const tier   = playerTier(kdVal);
-  const isTPP  = !!(sd?.data?.attributes?.gameModeStats?.['squad']?.roundsPlayed > 0 &&
-                   !(sd?.data?.attributes?.gameModeStats?.['squad-fpp']?.roundsPlayed > 0));
-  const avgDmg = s ? Math.round((s.damageDealt || 0) / Math.max(s.roundsPlayed || 1, 1)) : 0;
+  // Use pre-resolved cache-preferred stats from trunk — no re-derivation
+  const s    = resolvedS;
+  const l    = lt;
+  const tier = playerTier(kdVal || 0);
+  const isTPP = !!(sd?.data?.attributes?.gameModeStats?.['squad']?.roundsPlayed > 0 &&
+                  !(sd?.data?.attributes?.gameModeStats?.['squad-fpp']?.roundsPlayed > 0));
 
   const APE_IMGS = [
     '/images/ape1.png', '/images/ape2.png', '/images/ape3.png',
@@ -178,8 +176,8 @@ function PlayerCard({ member, sd, ld, resolvedS, lt, seasonError, weaponEntry, h
                 { label: 'Best Game',  val: `${num(s.roundMostKills || 0)}K`,                                    color: (s.roundMostKills||0) >= 10 ? '#4ade80' : undefined, tip: 'Most kills in a single match' },
                 { label: 'Matches',    val: num(s.roundsPlayed || 0) },
                 { label: 'Revives',    val: num(s.revives || 0),                                                 color: (s.revives||0) >= 10 ? '#60a5fa' : undefined, tip: 'Teammate revives this season' },
-                { label: 'HS %',       val: s.kills > 0 ? pct(s.headshotKills || 0, s.kills) : '—', tip: 'Headshot kill percentage' },
-                { label: 'Avg Survive',val: fmtSurvival((s.timeSurvived||0)/Math.max(s.roundsPlayed||1,1)), tip: 'Average time survived per match' },
+                { label: 'HS %',       val: (hsRate||0) > 0 ? (hsRate * 100).toFixed(1) + '%' : '—', tip: 'Headshot kill percentage' },
+                { label: 'Avg Survive',val: fmtSurvival(avgSurvival || 0), tip: 'Average time survived per match' },
                 { label: 'Knockdowns', val: num(s.dBNOs || 0),  tip: 'Down But Not Out — enemies knocked but not finished' },
                 { label: 'Top 10',     val: num(s.top10s || 0), tip: 'Number of top-10 finishes' },
                 { label: 'Streak',     val: `${num(s.maxKillStreaks || 0)}`,                                     color: (s.maxKillStreaks||0) >= 5 ? '#facc15' : undefined, tip: 'Highest kill streak in a single match' },
@@ -368,12 +366,12 @@ function PlayerCard({ member, sd, ld, resolvedS, lt, seasonError, weaponEntry, h
 }
 
 // ── Player Profile Modal ──────────────────────────────────────────────────────
-function PlayerProfileModal({ member, sd, ld, resolvedS, weaponEntry, historyEntry, lifetimeEntry, analysisProfile, onClose }) {
+function PlayerProfileModal({ member, sd, ld, resolvedS, kdVal: kdValProp, avgDmg: avgDmgProp, score: scoreProp, winRate: winRateProp, hsRate: hsRateProp, avgSurvival: avgSurvivalProp, weaponEntry, historyEntry, lifetimeEntry, analysisProfile, onClose }) {
   const [activeTab, setActiveTab] = useState('overview');
 
-  // Always use pre-resolved cache-preferred stats from resolvedStats — never re-extract
+  // Use pre-resolved stats and pre-computed derived metrics from trunk — no re-derivation
   const s      = resolvedS;
-  const kdVal  = s ? (s.kills || 0) / Math.max(s.losses || 1, 1) : 0;
+  const kdVal  = kdValProp  || 0;
   const tier   = playerTier(kdVal);
 
   const APE_IMGS = [
@@ -386,17 +384,17 @@ function PlayerProfileModal({ member, sd, ld, resolvedS, weaponEntry, historyEnt
   const nameHash = member.name.split('').reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 0);
   const imgSrc   = APE_IMGS[Math.abs(nameHash) % APE_IMGS.length];
 
-  // Season stats
+  // Season stats — all derived values come from trunk props, raw counts from s directly
   const season = s ? {
     games:     s.roundsPlayed || 0,
     kills:     s.kills        || 0,
     deaths:    s.losses       || 0,
-    kd:        kdVal,
+    kd:        kdValProp      || 0,
     wins:      s.wins         || 0,
-    winRate:   s.roundsPlayed ? (s.wins || 0) / s.roundsPlayed : 0,
+    winRate:   winRateProp    || 0,
     top10Rate: s.roundsPlayed ? (s.top10s || 0) / s.roundsPlayed : 0,
-    avgDmg:    s.roundsPlayed ? Math.round((s.damageDealt || 0) / s.roundsPlayed) : 0,
-    hsRate:    s.kills        ? (s.headshotKills || 0) / s.kills : 0,
+    avgDmg:    avgDmgProp     || 0,
+    hsRate:    hsRateProp     || 0,   // pre-computed from trunk
     revivesPg: s.roundsPlayed ? ((s.revives || 0) / s.roundsPlayed).toFixed(2) : '0',
     longestKill: Math.round(s.longestKill || 0),
   } : null;
@@ -740,13 +738,12 @@ function Players({ resolvedStats, loading, weaponData, lifetimeData, analysisDat
   const sortedStats = useMemo(() => {
     if (!resolvedStats) return resolvedStats;
     return [...resolvedStats].sort((a, b) => {
-      const sa = a.s, sb = b.s;
       if (playerSort === 'alpha')    return a.member.name.localeCompare(b.member.name);
-      if (playerSort === 'kd')       return ((sb?.kills||0)/Math.max(sb?.losses||1,1)) - ((sa?.kills||0)/Math.max(sa?.losses||1,1));
-      if (playerSort === 'wins')     return (sb?.wins||0) - (sa?.wins||0);
-      if (playerSort === 'kills')    return (sb?.kills||0) - (sa?.kills||0);
-      if (playerSort === 'damage')   return ((sb?.damageDealt||0)/Math.max(sb?.roundsPlayed||1,1)) - ((sa?.damageDealt||0)/Math.max(sa?.roundsPlayed||1,1));
-      if (playerSort === 'bestgame') return (sb?.roundMostKills||0) - (sa?.roundMostKills||0);
+      if (playerSort === 'kd')       return b.kdVal   - a.kdVal;   // pre-computed from trunk
+      if (playerSort === 'wins')     return b.wins     - a.wins;    // pre-computed from trunk
+      if (playerSort === 'kills')    return b.kills    - a.kills;   // pre-computed from trunk
+      if (playerSort === 'damage')   return b.avgDmg   - a.avgDmg;  // pre-computed from trunk
+      if (playerSort === 'bestgame') return (b.s?.roundMostKills||0) - (a.s?.roundMostKills||0);
       return 0;
     });
   }, [resolvedStats, playerSort]);
@@ -783,16 +780,18 @@ function Players({ resolvedStats, loading, weaponData, lifetimeData, analysisDat
         </div>
       </div>
       <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4" style={{ alignItems: 'start' }}>
-        {sortedStats.map(({ member, s, lt, season: sd, lifetime: ld, form, mapStats, recent, seasonError }) => {
+        {sortedStats.map(({ member, s, lt, season: sd, lifetime: ld, form, mapStats, recent, seasonError, kdVal, avgDmg, score, winRate, hsRate, avgSurvival }) => {
           const historyEntry = { form, mapStats, recent };
           return (
             <PlayerCard
               key={member.accountId}
               member={member} sd={sd} ld={ld} resolvedS={s} lt={lt} seasonError={seasonError}
+              kdVal={kdVal} avgDmg={avgDmg} score={score} winRate={winRate} hsRate={hsRate} avgSurvival={avgSurvival}
               weaponEntry={weaponData?.[member.accountId]}
               historyEntry={historyEntry}
               lifetimeEntry={lifetimeData?.players?.[member.accountId]}
               onViewProfile={() => setProfileTarget({ member, sd, ld, resolvedS: s,
+                kdVal, avgDmg, score, winRate, hsRate, avgSurvival,
                 weaponEntry:  weaponData?.[member.accountId],
                 historyEntry,
                 lifetimeEntry: lifetimeData?.players?.[member.accountId],

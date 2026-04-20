@@ -107,18 +107,18 @@ function Trends({ resolvedStats, loading, weaponData, squadData, heatmapData, an
 
   const players = useMemo(() => {
     if (!resolvedStats?.length) return [];
-    return resolvedStats.map(({ member, s, sApi }) => {
-      if (!s || (s.roundsPlayed || 0) < 5) return null;
+    return resolvedStats.map(({ member, s, games, kdVal, winRate, top10Rate, closeOutRate, hsRate, dmgPerKill, boostsPg, wins, top10 }) => {
+      if (!s || games < 5) return null;
       return {
         name: member.name,
-        kd: s.kills / Math.max(s.losses || 1, 1),
-        winRate: s.wins / s.roundsPlayed,
-        top10Rate: s.top10s / s.roundsPlayed,
-        closeOutRate: s.top10s > 0 ? s.wins / s.top10s : 0,
-        hsRate: s.kills > 3 ? s.headshotKills / s.kills : 0,
-        dmgPerKill: s.kills > 3 ? s.damageDealt / s.kills : null,
-        boostsPerGame: (sApi?.boosts || 0) / s.roundsPlayed,
-        matches: s.roundsPlayed, wins: s.wins, top10s: s.top10s,
+        kd:           kdVal,        // pre-computed from trunk
+        winRate,                    // pre-computed from trunk
+        top10Rate,                  // pre-computed from trunk
+        closeOutRate,               // pre-computed from trunk
+        hsRate,                     // pre-computed from trunk
+        dmgPerKill,                 // pre-computed from trunk
+        boostsPerGame: boostsPg,    // pre-computed from trunk
+        matches: games, wins, top10s: top10,
       };
     }).filter(Boolean);
   }, [resolvedStats]);

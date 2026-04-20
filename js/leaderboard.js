@@ -85,10 +85,10 @@ function Leaderboard({ resolvedStats, loading, weaponData, lifetimeData }) {
   const rows = useMemo(() => {
     if (!resolvedStats?.length) return [];
     return resolvedStats
-      .map(({ member, s, sApi, lt: l, form }) => {
+      .map(({ member, s, sApi, score, kdVal, winRate, avgDmg, avgSurvival, hsRate, boosts, heals, form }) => {
         return {
           name:          member.name,
-          score:         (() => { const kdV = s ? (s.kills||0)/Math.max(s.losses||1,1) : 0; const avgDmg = s?.roundsPlayed ? (s.damageDealt||0)/s.roundsPlayed : 0; const wr = s?.roundsPlayed ? (s.wins||0)/s.roundsPlayed : 0; return Math.round((kdV/3)*50 + (avgDmg/400)*30 + wr*20); })(),
+          score,                                        // pre-computed OVR from trunk
           kills:         s?.kills || 0,
           deaths:        s?.losses || 0,
           wins:          s?.wins || 0,
@@ -96,18 +96,18 @@ function Leaderboard({ resolvedStats, loading, weaponData, lifetimeData }) {
           top10:         s?.top10s || 0,
           assists:       s?.assists || 0,
           headshotKills: s?.headshotKills || 0,
-          kd:            s ? parseFloat(kd(s.kills || 0, s.losses || 0)) : 0,
-          winRate:       s?.roundsPlayed ? s.wins / s.roundsPlayed : 0,
-          avgDamage:     s?.roundsPlayed ? (s.damageDealt || 0) / s.roundsPlayed : 0,
+          kd:            kdVal,                         // pre-computed from trunk
+          winRate,                                      // pre-computed from trunk
+          avgDamage:     avgDmg,                        // pre-computed from trunk
           dBNOs:         s?.dBNOs || 0,
           revives:       sApi?.revives || 0,
           bestKills:     s?.roundMostKills || 0,
           streak:        sApi?.maxKillStreaks || 0,
-          hsRate:        s?.kills > 0 ? (s.headshotKills || 0) / s.kills : 0,
-          avgSurvive:    s?.roundsPlayed ? (s.timeSurvived || 0) / s.roundsPlayed : 0,
+          hsRate,                                       // pre-computed from trunk
+          avgSurvive:    avgSurvival,                   // pre-computed from trunk
           longestKill:   sApi?.longestKill || 0,
-          boosts:        sApi?.boosts || 0,
-          heals:         sApi?.heals || 0,
+          boosts,                                       // pre-computed from trunk
+          heals,                                        // pre-computed from trunk
           vehDestroys:   sApi?.vehicleDestroys || 0,
           roadKills:     sApi?.roadKills || 0,
           distance:      (sApi?.walkDistance || 0) + (sApi?.rideDistance || 0) + (sApi?.swimDistance || 0),

@@ -127,32 +127,20 @@ function corrStrength(r) {
 
 function computeAnalysisFromStats(resolvedStats) {
   const MIN_GAMES = 5;
-  const players = (resolvedStats || []).map(({ member, s, sApi }) => {
-    if (!s || (s.roundsPlayed || 0) < MIN_GAMES) return null;
-    const games  = s.roundsPlayed;
-    const kills  = s.kills      || 0;
-    const wins   = s.wins       || 0;
-    const top10  = s.top10s     || 0;
-    const hs     = s.headshotKills || 0;
-    const assists= s.assists    || 0;
-    // boosts/heals/longestKill are API-only (zeroed in match cache) — use sApi
-    const boosts = sApi?.boosts      || 0;
-    const heals  = sApi?.heals       || 0;
-    const longestKill = sApi?.longestKill || 0;
-    const losses      = Math.max(games - wins, 1);
+  // All derived metrics are pre-computed in the resolvedStats trunk by App.
+  // We destructure them directly — no re-derivation here.
+  const players = (resolvedStats || []).map(({ member, s, sApi,
+      games, kills, wins, top10,
+      kdVal, winRate, top10Rate, closeOutRate, nearMissRate,
+      hsRate, assistsPg, boostsPg, healsPg }) => {
+    if (!s || games < MIN_GAMES) return null;
     return {
-      name:          member.name,
-      games,  kills,  wins,  top10,
-      kd:            kills / losses,
-      winRate:       wins  / games,
-      top10Rate:     top10 / games,
-      closeOutRate:  top10 > 0 ? wins / top10 : 0,
-      nearMissRate:  (top10 - wins) / games,
-      hsRate:        kills > 0 ? hs / kills : 0,
-      assistsPg:     assists / games,
-      boostsPg:      boosts  / games,
-      healsPg:       heals   / games,
-      longestKill,
+      name: member.name,
+      games, kills, wins, top10,
+      kd:         kdVal,
+      winRate,    top10Rate,    closeOutRate, nearMissRate,
+      hsRate,     assistsPg,   boostsPg,     healsPg,
+      longestKill: sApi?.longestKill || 0,
     };
   }).filter(Boolean);
 

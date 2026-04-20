@@ -28,18 +28,59 @@ function App() {
   // getStats() calls or dual useMemo deps on both clanStats + historyData.
   const resolvedStats = useMemo(() => {
     if (!clanStats?.length) return [];
-    return clanStats.map(entry => ({
-      member:   entry.member,
-      s:        getStats(entry.member.accountId, entry.season, historyData), // cache-preferred
-      sApi:     extractStats(entry.season),                                  // always API (for non-trackable fields)
-      lt:       extractLifetimeStats(entry.lifetime),                        // pre-resolved lifetime
-      season:   entry.season,    // raw — needed by PlayerCard / archive rows
-      lifetime: entry.lifetime,  // raw — needed by PlayerCard
-      seasonId: entry.seasonId,
-      form:     historyData?.[entry.member.accountId]?.form     || null,
-      mapStats: historyData?.[entry.member.accountId]?.mapStats || null,
-      recent:   historyData?.[entry.member.accountId]?.recent   || [],
-    }));
+    return clanStats.map(entry => {
+      const s    = getStats(entry.member.accountId, entry.season, historyData); // cache-preferred
+      const sApi = extractStats(entry.season);                                  // always API (for non-trackable fields)
+
+      // ── Pre-compute ALL derived metrics here — the single source of truth ──
+      // No component should ever derive these independently.
+      const games      = s?.roundsPlayed  || 0;
+      const kills      = s?.kills         || 0;
+      const wins       = s?.wins          || 0;
+      const top10      = s?.top10s        || 0;
+      const losses     = s?.losses        || Math.max(games - wins, 1);
+      const hs         = s?.headshotKills || 0;
+      const assists    = s?.assists       || 0;
+      const dmg        = s?.damageDealt   || 0;
+      const timeSurv   = s?.timeSurvived  || 0;
+      const boosts     = sApi?.boosts     || 0;
+      const heals      = sApi?.heals      || 0;
+
+      const kdVal       = kills / Math.max(losses, 1);
+      const winRate     = games > 0 ? wins  / games  : 0;
+      const top10Rate   = games > 0 ? top10 / games  : 0;
+      const closeOutRate = top10 > 0 ? wins  / top10 : 0;
+      const nearMissRate = games > 0 ? (top10 - wins) / games : 0;
+      const hsRate      = kills > 0 ? hs / kills : 0;
+      const avgDmg      = games > 0 ? dmg / games      : 0;
+      const avgSurvival = games > 0 ? timeSurv / games : 0;
+      const killsPg     = games > 0 ? kills   / games  : 0;
+      const assistsPg   = games > 0 ? assists / games  : 0;
+      const boostsPg    = games > 0 ? boosts  / games  : 0;
+      const healsPg     = games > 0 ? heals   / games  : 0;
+      const dmgPerKill  = kills > 3  ? dmg / kills     : null;
+      // OVR score formula: K/D (×50) + Avg Dmg (×30) + Win Rate (×20)
+      const score       = Math.round((kdVal / 3) * 50 + (avgDmg / 400) * 30 + winRate * 20);
+
+      return {
+        member:   entry.member,
+        s,
+        sApi,
+        lt:       extractLifetimeStats(entry.lifetime), // pre-resolved lifetime
+        season:   entry.season,    // raw — needed by PlayerCard / archive rows
+        lifetime: entry.lifetime,  // raw — needed by PlayerCard
+        seasonId: entry.seasonId,
+        form:     historyData?.[entry.member.accountId]?.form     || null,
+        mapStats: historyData?.[entry.member.accountId]?.mapStats || null,
+        recent:   historyData?.[entry.member.accountId]?.recent   || [],
+        // ── Derived metrics (pre-computed — do not recompute in components) ──
+        games, kills, wins, top10, losses, hs, assists, dmg, timeSurv, boosts, heals,
+        kdVal, winRate, top10Rate, closeOutRate, nearMissRate,
+        hsRate, avgDmg, avgSurvival,
+        killsPg, assistsPg, boostsPg, healsPg, dmgPerKill,
+        score,
+      };
+    });
   }, [clanStats, historyData]);
 
   // ── Analysis computed from resolvedStats — same source of truth as all tabs ─

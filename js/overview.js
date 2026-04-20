@@ -1,21 +1,21 @@
 // ── Overview tab ──────────────────────────────────────────────────────────────
 const OVERVIEW_STATS = [
   { id: 'kd',       label: 'Clan K/D',     tip: 'Kill/Death ratio — total clan kills ÷ deaths', key: t => kd(t.kills, t.deaths),                                   sub: t => `${num(t.kills)} kills`,                     accent: true,  icon: '⚔️',
-    detail: { title: 'K/D Ratio — Per Player', desc: 'Season kills ÷ deaths. Higher = more lethal.', playerKey: r => parseFloat(kd(r.s?.kills||0, r.s?.losses||0)), playerFmt: r => kd(r.s?.kills||0, r.s?.losses||0), playerSub: r => `${num(r.s?.kills||0)} kills / ${num(r.s?.losses||0)} deaths` } },
+    detail: { title: 'K/D Ratio — Per Player', desc: 'Season kills ÷ deaths. Higher = more lethal.', playerKey: r => r.kdVal || 0, playerFmt: r => (r.kdVal||0).toFixed(2), playerSub: r => `${num(r.kills||0)} kills / ${num(r.losses||0)} deaths` } },
   { id: 'wins',     label: 'Total Wins',   tip: null, key: t => num(t.wins),                                              sub: t => pct(t.wins, t.matches) + ' win rate',         accent: false, icon: '🏆',
-    detail: { title: 'Wins — Per Player', desc: 'Chicken dinners this season.', playerKey: r => r.s?.wins||0, playerFmt: r => num(r.s?.wins||0), playerSub: r => `${pct(r.s?.wins||0, r.s?.roundsPlayed||1)} win rate` } },
+    detail: { title: 'Wins — Per Player', desc: 'Chicken dinners this season.', playerKey: r => r.wins||0, playerFmt: r => num(r.wins||0), playerSub: r => `${pct(r.wins||0, r.games||1)} win rate` } },
   { id: 'kills',    label: 'Clan Kills',   tip: null, key: t => num(t.kills),                                             sub: t => `${round(t.kills/Math.max(t.matches,1))} avg/match`, accent: false, icon: '💀',
-    detail: { title: 'Kills — Per Player', desc: 'Total season kills per member.', playerKey: r => r.s?.kills||0, playerFmt: r => num(r.s?.kills||0), playerSub: r => `${round((r.s?.kills||0)/Math.max(r.s?.roundsPlayed||1,1))} avg/match` } },
+    detail: { title: 'Kills — Per Player', desc: 'Total season kills per member.', playerKey: r => r.kills||0, playerFmt: r => num(r.kills||0), playerSub: r => `${round(r.killsPg||0)} avg/match` } },
   { id: 'damage',   label: 'Avg Damage',   tip: 'Average damage dealt per match across all players', key: t => num(Math.round(t.damage/Math.max(t.matches,1))),         sub: t => `${num(Math.round(t.damage))} total`,           accent: false, icon: '💥',
-    detail: { title: 'Avg Damage — Per Player', desc: 'Average damage dealt per match.', playerKey: r => (r.s?.damageDealt||0)/Math.max(r.s?.roundsPlayed||1,1), playerFmt: r => num(Math.round((r.s?.damageDealt||0)/Math.max(r.s?.roundsPlayed||1,1))), playerSub: r => `${num(Math.round(r.s?.damageDealt||0))} total dmg` } },
+    detail: { title: 'Avg Damage — Per Player', desc: 'Average damage dealt per match.', playerKey: r => r.avgDmg||0, playerFmt: r => num(Math.round(r.avgDmg||0)), playerSub: r => `${num(Math.round(r.dmg||0))} total dmg` } },
   { id: 'top10',    label: 'Top 10 Rate',  tip: 'Percentage of matches finishing in the top 10', key: t => pct(t.top10, t.matches),                                 sub: t => `${num(t.top10)} top-10s`,                   accent: false, icon: '🎯',
-    detail: { title: 'Top 10 Rate — Per Player', desc: 'How often they finish in the top 10.', playerKey: r => (r.s?.top10s||0)/Math.max(r.s?.roundsPlayed||1,1), playerFmt: r => pct(r.s?.top10s||0, r.s?.roundsPlayed||1), playerSub: r => `${num(r.s?.top10s||0)} top-10s` } },
+    detail: { title: 'Top 10 Rate — Per Player', desc: 'How often they finish in the top 10.', playerKey: r => r.top10Rate||0, playerFmt: r => pct(r.top10||0, r.games||1), playerSub: r => `${num(r.top10||0)} top-10s` } },
   { id: 'matches',  label: 'Matches',      tip: null, key: t => num(t.matches),                                          sub: t => 'this season',                                accent: false, icon: '🎮',
-    detail: { title: 'Matches Played — Per Player', desc: 'Season matches played.', playerKey: r => r.s?.roundsPlayed||0, playerFmt: r => num(r.s?.roundsPlayed||0), playerSub: r => `${num(r.s?.wins||0)} wins` } },
+    detail: { title: 'Matches Played — Per Player', desc: 'Season matches played.', playerKey: r => r.games||0, playerFmt: r => num(r.games||0), playerSub: r => `${num(r.wins||0)} wins` } },
   { id: 'headshot', label: 'Headshot %',   tip: 'Percentage of kills that are headshots', key: t => t.kills > 0 ? pct(t.headshots, t.kills) : '—',          sub: t => `${num(t.headshots)} HS kills`,               accent: false, icon: '🔫',
-    detail: { title: 'Headshot % — Per Player', desc: 'Share of kills that were headshots. Marker of aim precision.', playerKey: r => (r.s?.headshotKills||0)/Math.max(r.s?.kills||1,1), playerFmt: r => pct(r.s?.headshotKills||0, r.s?.kills||1), playerSub: r => `${num(r.s?.headshotKills||0)} HS / ${num(r.s?.kills||0)} kills` } },
+    detail: { title: 'Headshot % — Per Player', desc: 'Share of kills that were headshots. Marker of aim precision.', playerKey: r => r.hsRate||0, playerFmt: r => pct(r.hs||0, r.kills||1), playerSub: r => `${num(r.hs||0)} HS / ${num(r.kills||0)} kills` } },
   { id: 'survive',  label: 'Avg Survive',  tip: 'Average survival time per match', key: t => fmtSurvival(t.timeSurvived / Math.max(t.matches, 1)),   sub: t => `${num(Math.round(t.timeSurvived/60))} min total`, accent: false, icon: '⏱️',
-    detail: { title: 'Avg Survival Time — Per Player', desc: 'Average minutes alive per match. Longer = better positioning.', playerKey: r => (r.s?.timeSurvived||0)/Math.max(r.s?.roundsPlayed||1,1), playerFmt: r => fmtSurvival((r.s?.timeSurvived||0)/Math.max(r.s?.roundsPlayed||1,1)), playerSub: r => `${num(Math.round((r.s?.timeSurvived||0)/60))} min total` } },
+    detail: { title: 'Avg Survival Time — Per Player', desc: 'Average minutes alive per match. Longer = better positioning.', playerKey: r => r.avgSurvival||0, playerFmt: r => fmtSurvival(r.avgSurvival||0), playerSub: r => `${num(Math.round((r.timeSurv||0)/60))} min total` } },
   { id: 'teamwork', label: 'Clan Revives', tip: 'Total teammate revives across all players this season', key: t => num(t.revives),                                          sub: t => `${num(t.dBNOs)} knockdowns`,                 accent: false, icon: '🤝',
     detail: { title: 'Revives — Per Player', desc: 'Teammates brought back up. A high number signals a strong team player.', playerKey: r => r.s?.revives||0, playerFmt: r => num(r.s?.revives||0), playerSub: r => `${num(r.s?.dBNOs||0)} knockdowns` } },
   { id: 'assists',  label: 'Assists',      tip: 'Damage dealt on enemies killed by a teammate', key: t => num(t.assists),                                          sub: t => 'this season',                                accent: false, icon: '🦾',
@@ -273,19 +273,20 @@ function Overview({ members, resolvedStats, season, loading, onLogoClick }) {
 
   // Best player per category
   const bests = useMemo(() => {
-    const rows = resolvedStats?.filter(r => r.s && (r.s.roundsPlayed || 0) > 0) || [];
+    const rows = resolvedStats?.filter(r => r.s && r.games > 0) || [];
     if (!rows.length) return {};
     const best = fn => rows.reduce((t, r) => !t || fn(r) > fn(t) ? r : t, null);
+    // All derived metrics come from trunk — no inline re-derivation
     return {
-      kd:        best(r => r.s.losses ? (r.s.kills||0)/r.s.losses : (r.s.kills||0)),
-      wins:      best(r => r.s.wins      || 0),
-      kills:     best(r => r.s.kills     || 0),
-      damage:    best(r => (r.s.damageDealt||0) / Math.max(r.s.roundsPlayed||1, 1)),
-      top10:     best(r => (r.s.top10s||0)  / Math.max(r.s.roundsPlayed||1, 1)),
-      headshot:  best(r => r.s.kills > 0 ? (r.s.headshotKills||0)/r.s.kills : 0),
-      survive:   best(r => (r.s.timeSurvived||0) / Math.max(r.s.roundsPlayed||1, 1)),
+      kd:        best(r => r.kdVal),
+      wins:      best(r => r.wins),
+      kills:     best(r => r.kills),
+      damage:    best(r => r.avgDmg),
+      top10:     best(r => r.top10Rate),
+      headshot:  best(r => r.hsRate),
+      survive:   best(r => r.avgSurvival),
       teamwork:  best(r => r.s.revives   || 0),
-      assists:   best(r => r.s.assists   || 0),
+      assists:   best(r => r.assists),
       roadKills: best(r => r.s.roadKills || 0),
     };
   }, [resolvedStats]);
@@ -365,15 +366,15 @@ function Overview({ members, resolvedStats, season, loading, onLogoClick }) {
             <div style={{ fontSize: 36, lineHeight: 1 }}>🏅</div>
             <div style={{ display: 'flex', flex: 1, flexWrap: 'wrap', gap: 14 }}>
               {[
-                { label: 'Best K/D',       r: bests.kd,        val: r => kd(r.s?.kills||0, r.s?.losses||0) },
-                { label: 'Most Wins',      r: bests.wins,      val: r => num(r.s?.wins||0) },
-                { label: 'Most Kills',     r: bests.kills,     val: r => num(r.s?.kills||0) },
-                { label: 'Avg Damage',     r: bests.damage,    val: r => num(Math.round((r.s?.damageDealt||0)/Math.max(r.s?.roundsPlayed||1,1))) },
-                { label: 'Top 10 Rate',    r: bests.top10,     val: r => pct(r.s?.top10s||0, r.s?.roundsPlayed||1) },
-                { label: 'HS Accuracy',    r: bests.headshot,  val: r => pct(r.s?.headshotKills||0, r.s?.kills||1) },
-                { label: 'Avg Survival',   r: bests.survive,   val: r => fmtSurvival((r.s?.timeSurvived||0)/Math.max(r.s?.roundsPlayed||1,1)) },
+                { label: 'Best K/D',       r: bests.kd,        val: r => (r.kdVal||0).toFixed(2) },
+                { label: 'Most Wins',      r: bests.wins,      val: r => num(r.wins||0) },
+                { label: 'Most Kills',     r: bests.kills,     val: r => num(r.kills||0) },
+                { label: 'Avg Damage',     r: bests.damage,    val: r => num(Math.round(r.avgDmg||0)) },
+                { label: 'Top 10 Rate',    r: bests.top10,     val: r => pct(r.top10||0, r.games||1) },
+                { label: 'HS Accuracy',    r: bests.headshot,  val: r => pct(r.hs||0, r.kills||1) },
+                { label: 'Avg Survival',   r: bests.survive,   val: r => fmtSurvival(r.avgSurvival||0) },
                 { label: 'Teamwork',       r: bests.teamwork,  val: r => `${num(r.s?.revives||0)} revs` },
-                { label: 'Most Assists',   r: bests.assists,   val: r => num(r.s?.assists||0) },
+                { label: 'Most Assists',   r: bests.assists,   val: r => num(r.assists||0) },
                 { label: 'Road Kills',     r: bests.roadKills, val: r => num(r.s?.roadKills||0) },
               ].filter(c => c.r).map(({ label, r, val }) => (
                 <div key={label} style={{ minWidth: 90 }}>
