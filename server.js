@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict';
-// ── APES Clan Stats — local web server ───────────────────────────────────────
+// ── Clan Stats — local web server ───────────────────────────────────────
 // No npm dependencies — uses only Node.js built-ins.
 // Run: node server.js  →  open http://localhost:3002
 
@@ -8,228 +8,47 @@ const http = require('http');
 const fs   = require('fs');
 const path = require('path');
 
-const { PORT, BASE, DATA, loadEnv }        = require('./lib/config');
-const { MIME, jsonRes, errRes, htmlRes }   = require('./lib/http');
+const { PORT, BASE, DATA, loadEnv, loadClanConfig, frontendClanConfig, resolveInside } = require('./lib/config');
+const { MIME, jsonRes, errRes, htmlRes, buildSecurityHeaders }   = require('./lib/http');
 const { handlePlayers }                    = require('./routes/players');
 const { handleSeasons }                    = require('./routes/seasons');
 const { handleMatches }                    = require('./routes/matches');
 const { handleBotInteraction }             = require('./routes/bot');
 const { startNotifier, notifierState, scan: notifierScan } = require('./lib/notifier');
-const {
-  clearCache, cacheSize,
-  getCurrentSeason,
-  batchGetSeasonStats,
-  batchGetLifetimeStats,
-  _batchSeasonStatsByMode,
-  _batchLifetimeStatsByMode,
-  getPlayer,
-} = require('./lib/pubg');
+const { startGateway, gatewayState }       = require('./lib/discord-gateway');
+const { prewarm, prewarmStats, diskCacheHasRealStats } = require('./lib/prewarm');
+const { clearCache, cacheSize } = require('./lib/pubg');
+const { requireAdmin, verifyAdminRequest } = require('./lib/admin-auth');
 
-const sleep = ms => new Promise(r => setTimeout(r, ms));
-const PREWARM_CALL_DELAY = 7000; // 7s between API calls → ~8.5 RPM for 26 members
+function combineLifetimeStats(lifetime) {
+  const modes = lifetime?.data?.attributes?.gameModeStats;
+  if (!modes) return null;
 
-// ── Pre-warm state ────────────────────────────────────────────────────────────
-const prewarm = {
-  running:   false,
-  done:      false,
-  total:     0,
-  completed: 0,
-  errors:    0,
-  startedAt: null,
-  log:       [],
-};
+  const fpp = modes['squad-fpp'] || {};
+  const tpp = modes.squad || {};
+  const fppRounds = fpp.roundsPlayed || 0;
+  const tppRounds = tpp.roundsPlayed || 0;
 
-const SEASON_CACHE_FILE = path.join(DATA, 'season.json');
+  if (fppRounds === 0 && tppRounds === 0) return null;
+  if (fppRounds === 0) return tpp;
+  if (tppRounds === 0) return fpp;
 
-function loadMembers() {
-  const f = path.join(DATA, 'members.json');
-  try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return []; }
-}
-
-// Persist season ID to disk so server restarts don't need an API call
-function saveSeasonId(seasonId) {
-  try { fs.writeFileSync(SEASON_CACHE_FILE, JSON.stringify({ seasonId, savedAt: Date.now() })); } catch {}
-}
-function loadSavedSeasonId() {
-  try {
-    const d = JSON.parse(fs.readFileSync(SEASON_CACHE_FILE, 'utf8'));
-    // Treat saved season as valid for up to 14 days (seasons last ~6 weeks)
-    if (d.seasonId && Date.now() - d.savedAt < 14 * 24 * 60 * 60 * 1000) return d.seasonId;
-  } catch {}
-  return null;
-}
-
-async function prewarmStats() {
-  if (prewarm.running) return;
-  prewarm.running   = true;
-  prewarm.done      = false;
-  prewarm.completed = 0;
-  prewarm.errors    = 0;
-  prewarm.startedAt = Date.now();
-  prewarm.log       = [];
-
-  const members = loadMembers();
-  if (!members.length) { prewarm.running = false; prewarm.done = true; return; }
-
-  // 2 batch operations: season stats + lifetime stats
-  prewarm.total = 2;
-  const accountIds = members.map(m => m.accountId);
-  const batches    = Math.ceil(members.length / 10);
-
-  const totalCalls = batches * 4 + 1; // 4 modes × batches + 1 season call
-  prewarm.log.push(`Starting pre-warm for ${members.length} members (${totalCalls} API calls, ~${Math.ceil(totalCalls * PREWARM_CALL_DELAY / 60000)}min)…`);
-  console.log(`[APES] 🔄 Pre-warming stats cache for ${members.length} members — ${totalCalls} calls, paced at 1 per ${PREWARM_CALL_DELAY/1000}s…`);
-
-  // Try API first; fall back to disk-cached season ID on rate limit
-  let seasonId;
-  try {
-    const s = await getCurrentSeason();
-    seasonId = s?.id;
-    if (seasonId) { saveSeasonId(seasonId); prewarm.log.push(`Season: ${seasonId} (live)`); }
-  } catch (e) {
-    const saved = loadSavedSeasonId();
-    if (saved) {
-      seasonId = saved;
-      prewarm.log.push(`Season API rate-limited — using cached ID: ${seasonId}`);
-      console.log(`[APES] ⚠ Season API rate-limited, using saved season: ${seasonId}`);
-    } else {
-      prewarm.log.push(`Season lookup failed: ${e.message}`);
-      prewarm.running = false;
-      prewarm.done    = true;
-      return;
-    }
+  const combined = {};
+  const keys = new Set([...Object.keys(fpp), ...Object.keys(tpp)]);
+  for (const key of keys) {
+    const fv = typeof fpp[key] === 'number' ? fpp[key] : 0;
+    const tv = typeof tpp[key] === 'number' ? tpp[key] : 0;
+    combined[key] = fv + tv;
   }
-
-  // Sequential batch calls with delay between each — stays well under 10 RPM
-  // Each _batchSeasonStatsByMode call is 1 API call per batch-of-10 players
-  const modes = ['squad-fpp', 'squad'];
-  let seasonOk = 0, lifetimeOk = 0;
-
-  // Season stats — 2 modes × batches calls, one at a time
-  prewarm.log.push(`Fetching season stats (${batches * 2} calls, paced)…`);
-  for (const mode of modes) {
-    for (let offset = 0; offset < accountIds.length; offset += 10) {
-      const batch = accountIds.slice(offset, offset + 10);
-      await sleep(PREWARM_CALL_DELAY);
-      try {
-        await _batchSeasonStatsByMode(batch, seasonId, mode);
-        seasonOk++;
-      } catch (e) {
-        prewarm.errors++;
-        console.warn(`[APES] Season ${mode} batch ${Math.floor(offset/10)+1} failed:`, e.message);
-      }
-    }
-  }
-  if (seasonOk > 0) {
-    prewarm.completed++;
-    prewarm.log.push(`✓ Season stats cached (${seasonOk}/${batches*2} batches ok)`);
-    console.log(`[APES] ✓ Season stats cached (${prewarm.completed}/2)`);
-  } else {
-    prewarm.errors++;
-    prewarm.log.push(`✗ Season stats — all batches failed`);
-  }
-
-  // Lifetime stats — 2 modes × batches calls, one at a time
-  prewarm.log.push(`Fetching lifetime stats (${batches * 2} calls, paced)…`);
-  for (const mode of modes) {
-    for (let offset = 0; offset < accountIds.length; offset += 10) {
-      const batch = accountIds.slice(offset, offset + 10);
-      await sleep(PREWARM_CALL_DELAY);
-      try {
-        await _batchLifetimeStatsByMode(batch, mode);
-        lifetimeOk++;
-      } catch (e) {
-        prewarm.errors++;
-        console.warn(`[APES] Lifetime ${mode} batch ${Math.floor(offset/10)+1} failed:`, e.message);
-      }
-    }
-  }
-  if (lifetimeOk > 0) {
-    prewarm.completed++;
-    prewarm.log.push(`✓ Lifetime stats cached (${lifetimeOk}/${batches*2} batches ok)`);
-    console.log(`[APES] ✓ Lifetime stats cached (${prewarm.completed}/2)`);
-  } else {
-    prewarm.errors++;
-    prewarm.log.push(`✗ Lifetime stats — all batches failed`);
-  }
-
-  // Player object pre-warm — fetch each member's player object so the first
-  // match-history click costs 0 API calls for the player lookup (disk-cached).
-  // Paced at 7s per call, same as the other prewarm passes.
-  prewarm.log.push(`Fetching player objects (${members.length} calls, paced)…`);
-  prewarm.total += members.length;
-  let playerOk = 0;
-  for (const m of members) {
-    await sleep(PREWARM_CALL_DELAY);
-    try {
-      await getPlayer(m.accountId); // writes to player_cache/ on disk automatically
-      playerOk++;
-    } catch (e) {
-      prewarm.errors++;
-      console.warn(`[APES] Player prewarm failed for ${m.name}:`, e.message);
-    }
-  }
-  if (playerOk > 0) {
-    prewarm.completed++;
-    prewarm.log.push(`✓ Player objects cached (${playerOk}/${members.length} ok)`);
-    console.log(`[APES] ✓ Player objects disk-cached (${playerOk}/${members.length})`);
-  } else {
-    prewarm.log.push(`✗ Player objects — all failed`);
-  }
-
-  prewarm.running = false;
-  prewarm.done    = true;
-  const elapsed = Math.round((Date.now() - prewarm.startedAt) / 1000);
-  console.log(`[APES] ✅ Pre-warm done in ${elapsed}s — ${prewarm.completed}/3 passes cached, ${prewarm.errors} errors`);
-
-  // Persist stats to disk — but only if we actually got real data (not all-null from rate limit)
-  if (prewarm.completed > 0 && seasonId) {
-    try {
-      const { batchGetSeasonStats: bgs, batchGetLifetimeStats: bgl } = require('./lib/pubg');
-      const accountIds = members.map(m => m.accountId);
-      // These hit in-memory cache (populated above), so no extra API calls
-      const seasonMap   = await bgs(accountIds, seasonId).catch(() => new Map());
-      const lifetimeMap = await bgl(accountIds).catch(() => new Map());
-      const stats = members.map(m => ({
-        member:   m,
-        seasonId,
-        season:   seasonMap.get(m.accountId)   || null,
-        lifetime: lifetimeMap.get(m.accountId) || null,
-      }));
-      // Validate: only write if at least one player has actual rounds played
-      const hasRealStats = stats.some(s => {
-        const gms = s.season?.data?.attributes?.gameModeStats;
-        return (gms?.squad?.roundsPlayed > 0) || (gms?.['squad-fpp']?.roundsPlayed > 0);
-      });
-      if (hasRealStats) {
-        const STATS_FILE = path.join(DATA, 'stats_cache.json');
-        // Archive previous season before overwriting if seasonId changed
-        try {
-          const { archiveIfSeasonChanged } = require('./scripts/archive_season');
-          const result = archiveIfSeasonChanged(seasonId);
-          if (result.archived) {
-            console.log(`[APES] 🔄 Season rollover: ${result.fromSeasonId} → ${result.toSeasonId}`);
-          }
-        } catch (e) {
-          console.warn('[APES] Could not archive previous season:', e.message);
-        }
-        fs.writeFileSync(STATS_FILE, JSON.stringify({ stats, seasonId, savedAt: Date.now() }, null, 2));
-        console.log(`[APES] 💾 Stats persisted to disk (${stats.length} members)`);
-      } else {
-        console.warn('[APES] Skipping disk write — all season stats are null (rate limit during prewarm)');
-      }
-    } catch (e) {
-      console.warn('[APES] Could not persist stats to disk:', e.message);
-    }
-  }
+  return combined;
 }
 
 // ── Validate API key on startup ───────────────────────────────────────────────
 const env = loadEnv();
 if (!env.PUBG_API_KEY) {
-  console.error('[APES] ⚠️  No PUBG_API_KEY found in .env — API calls will fail.');
+  console.error('[3PI] ⚠️  No PUBG_API_KEY found in .env — API calls will fail.');
 } else {
-  console.log('[APES] ✓  PUBG API key loaded.');
+  console.log('[3PI] ✓  PUBG API key loaded.');
 }
 
 // ── Static file server ────────────────────────────────────────────────────────
@@ -238,12 +57,92 @@ function serveStatic(res, filePath) {
   const mime = MIME[ext] || 'application/octet-stream';
   try {
     const data = fs.readFileSync(filePath);
-    res.writeHead(200, { 'Content-Type': mime, 'Content-Length': data.length });
+    res.writeHead(200, buildSecurityHeaders(mime, {
+      'Content-Type': mime,
+      'Content-Length': data.length,
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0',
+    }, res.req));
     res.end(data);
   } catch {
-    res.writeHead(404);
+    res.writeHead(404, buildSecurityHeaders('text/plain; charset=utf-8', {}, res.req));
     res.end('Not found');
   }
+}
+
+// Serve index.html with clan branding injected from config (single source).
+// Replaces {{CLAN_*}} tokens and injects window.__CLAN_CONFIG__ for the bundle.
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, ch => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]
+  ));
+}
+
+function serializeScriptJson(value) {
+  return JSON.stringify(value).replace(/[<>&\u2028\u2029]/g, ch => ({
+    '<': '\\u003c',
+    '>': '\\u003e',
+    '&': '\\u0026',
+    '\u2028': '\\u2028',
+    '\u2029': '\\u2029',
+  }[ch]));
+}
+
+function serveIndex(res) {
+  try {
+    const c   = loadClanConfig();
+    const fe  = frontendClanConfig();
+    let html  = fs.readFileSync(path.join(BASE, 'index.html'), 'utf8');
+    const repl = {
+      '{{CLAN_TITLE}}':     escapeHtml(`${c.clan.shortName} Stats`),
+      '{{CLAN_NAME}}':      escapeHtml(c.clan.name),
+      '{{CLAN_BOOT_TITLE}}': escapeHtml(c.clan.bootTitle),
+      '{{CLAN_BOOT_BODY}}':  escapeHtml(c.clan.bootBody),
+    };
+    for (const [k, v] of Object.entries(repl)) html = html.split(k).join(v);
+    // Inject the non-secret config object so the bundle can read it synchronously.
+    const inject = `<script>window.__CLAN_CONFIG__ = ${serializeScriptJson(fe)};</script>`;
+    html = html.replace('</head>', `${inject}\n</head>`);
+
+    const buf = Buffer.from(html, 'utf8');
+    res.writeHead(200, buildSecurityHeaders('text/html; charset=utf-8', {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Content-Length': buf.length,
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0',
+    }, res.req));
+    res.end(buf);
+  } catch {
+    res.writeHead(404, buildSecurityHeaders('text/plain; charset=utf-8', {}, res.req));
+    res.end('Not found');
+  }
+}
+
+function publicStaticPath(pathname) {
+  const exact = new Set([
+    '/icon-192.png',
+    '/icon-512.png',
+    '/sw.js',
+    '/security.txt',
+    '/.well-known/security.txt',
+  ]);
+  if (exact.has(pathname)) return resolveInside(BASE, pathname.replace(/^\//, ''));
+  if (pathname.startsWith('/dist/') || pathname.startsWith('/images/')) {
+    return resolveInside(BASE, pathname.replace(/^\//, ''));
+  }
+  return null;
+}
+
+function maybeRedirectToHttps(req, res) {
+  const proto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim().toLowerCase();
+  if (proto !== 'http') return false;
+  const host = String(req.headers.host || '').trim();
+  if (!host) return false;
+  res.writeHead(308, { Location: `https://${host}${req.url || '/'}` });
+  res.end('');
+  return true;
 }
 
 // ── Request router ────────────────────────────────────────────────────────────
@@ -252,16 +151,18 @@ async function router(req, res) {
   const url    = new URL(rawUrl, `http://localhost:${PORT}`);
   const p      = url.pathname;
 
+  if (maybeRedirectToHttps(req, res)) return;
+
   // CORS for local dev
   res.setHeader('Access-Control-Allow-Origin', '*');
   if (req.method === 'OPTIONS') { res.writeHead(204); return res.end(); }
 
   // ── Discord bot interactions (/interactions — must come before body parsing) ─
-  if (req.method === 'POST' && p === '/interactions') {
+  if (req.method === 'POST' && (p === '/interactions' || p === '/api/bot/interactions')) {
     try {
       await handleBotInteraction(req, res, url);
     } catch (e) {
-      console.error('[APES Bot] Unhandled error:', e.message);
+      console.error('[3PI Bot] Unhandled error:', e.message);
       if (!res.writableEnded) { res.writeHead(500); res.end('Internal error'); }
     }
     return;
@@ -272,6 +173,7 @@ async function router(req, res) {
     try {
       // Cache management
       if (req.method === 'POST' && p === '/api/cache/clear') {
+        if (!requireAdmin(req, res)) return;
         const { parseBody } = require('./lib/http');
         const body = await parseBody(req).catch(() => ({}));
         clearCache({ disk: !!body.disk, matches: !!body.matches });
@@ -293,31 +195,32 @@ async function router(req, res) {
         });
       }
 
+      // Server-side admin verification for the hidden Settings tools.
+      if (req.method === 'POST' && p === '/api/admin/verify') {
+        const { parseBody } = require('./lib/http');
+        const body = await parseBody(req).catch(() => ({}));
+        const result = verifyAdminRequest(req, body.password || '');
+        if (!result.ok) return errRes(res, result.error, result.status);
+        return jsonRes(res, { ok: true });
+      }
+
       // Pre-warm status
       if (req.method === 'GET' && p === '/api/prewarm/status') {
         return jsonRes(res, { ...prewarm, elapsed: prewarm.startedAt ? Math.round((Date.now() - prewarm.startedAt) / 1000) : null });
       }
       // Trigger pre-warm manually
       if (req.method === 'POST' && p === '/api/prewarm') {
+        if (!requireAdmin(req, res, { allowLocal: true })) return;
         prewarm.done = false;
         prewarmStats();
         return jsonRes(res, { ok: true, message: 'Pre-warm started' });
       }
 
-      // Trends — pre-computed correlations + history
-      if (req.method === 'GET' && p === '/api/trends') {
-        const TRENDS_FILE = path.join(DATA, 'trends_cache.json');
-        const HIST_FILE   = path.join(DATA, 'trends_history.json');
-        if (!fs.existsSync(TRENDS_FILE)) return errRes(res, 'No trends cache — run daily_clan.js first', 404);
-        const trends  = JSON.parse(fs.readFileSync(TRENDS_FILE, 'utf8'));
-        let history = [];
-        if (fs.existsSync(HIST_FILE)) {
-          try { history = JSON.parse(fs.readFileSync(HIST_FILE, 'utf8')); } catch {}
-        }
-        return jsonRes(res, { ...trends, history });
-      }
+      // (/api/trends removed 2026-06-10 — trends are computed client-side from
+      // resolvedStats; the trends_cache.json it served was last written Apr 20.)
 
-      // Analysis — non-circular player analysis (close-out rate, HS%, assists, archetypes)
+      // Analysis — AI per-player profiles from analysis_cache.json (written by
+      // the daily Cowork task, Phase B5; consumed by app.js player cards)
       if (req.method === 'GET' && p === '/api/analysis') {
         const ANALYSIS_FILE = path.join(DATA, 'analysis_cache.json');
         if (!fs.existsSync(ANALYSIS_FILE)) return errRes(res, 'No analysis cache — run daily_clan.js first', 404);
@@ -348,48 +251,64 @@ async function router(req, res) {
         return jsonRes(res, { landings: cache.landings || {}, processedMatches: cache.processedMatches?.length || 0 });
       }
 
+      // Telemetry playbook — deterministic telemetry-derived coaching cards
+      if (req.method === 'GET' && p === '/api/telemetry-insights') {
+        const FILE = path.join(DATA, 'telemetry_insights_cache.json');
+        if (!fs.existsSync(FILE)) return errRes(res, 'No telemetry insights cache — run build_telemetry_insights.js first', 404);
+        return jsonRes(res, JSON.parse(fs.readFileSync(FILE, 'utf8')));
+      }
+
       // Season archive index — list of all archived seasons
-      if (req.method === 'GET' && p === '/api/seasons') {
+      if (req.method === 'GET' && p === '/api/archive/seasons') {
         const { buildSeasonIndex } = require('./scripts/archive_season');
         return jsonRes(res, buildSeasonIndex());
       }
 
       // Archived season stats — serve a specific season's stats like /api/stats would
-      if (req.method === 'GET' && p.startsWith('/api/seasons/')) {
-        const seasonId = decodeURIComponent(p.replace('/api/seasons/', ''));
+      if (req.method === 'GET' && p.startsWith('/api/archive/seasons/')) {
+        const seasonId = decodeURIComponent(p.replace('/api/archive/seasons/', ''));
         const { loadArchivedSeason } = require('./scripts/archive_season');
         const data = loadArchivedSeason(seasonId);
         if (!data) return errRes(res, `No archive for season: ${seasonId}`, 404);
         return jsonRes(res, data);
       }
 
-      // Lifetime stats — per-player career totals from stats_cache
+      // Lifetime (career) stats — combined official squad-fpp + squad totals from stats_cache lifetime payloads
       if (req.method === 'GET' && p === '/api/lifetime') {
         const STATS_FILE = path.join(DATA, 'stats_cache.json');
         if (!fs.existsSync(STATS_FILE)) return errRes(res, 'No stats cache — run prewarm first', 404);
-        const { extractLifetimeStats } = require('./lib/discord-interactions');
         const cache = JSON.parse(fs.readFileSync(STATS_FILE, 'utf8'));
         const out = {};
-        (cache.stats || []).forEach(p => {
-          const lt = extractLifetimeStats(p.lifetime);
-          if (!lt || !lt.roundsPlayed) return;
-          const rounds = lt.roundsPlayed;
-          out[p.member.accountId] = {
-            name:      p.member.name,
+        for (const entry of cache.stats || []) {
+          const accountId = entry.member?.accountId;
+          const t = combineLifetimeStats(entry.lifetime);
+          if (!accountId || !entry.member?.name) continue;
+          if (!t || !t.roundsPlayed) continue;
+          const rounds = t.roundsPlayed;
+          out[accountId] = {
+            name:      entry.member.name,
             games:     rounds,
-            kills:     lt.kills,
-            wins:      lt.wins,
-            losses:    lt.losses,
-            kd:        lt.losses > 0 ? +(lt.kills / lt.losses).toFixed(2) : +lt.kills.toFixed(2),
-            winRate:   +(lt.wins  / rounds).toFixed(4),
-            hsRate:    lt.kills > 0 ? +(lt.headshotKills / lt.kills).toFixed(4) : 0,
-            avgDamage: +(lt.damageDealt / rounds).toFixed(1),
-            top10Rate: +(lt.top10s / rounds).toFixed(4),
-            revives:   lt.revives,
-            revivesPg: +(lt.revives / rounds).toFixed(3),
+            kills:     t.kills     || 0,
+            wins:      t.wins      || 0,
+            losses:    t.losses    ?? 0,
+            kd:        t.losses > 0 ? +(t.kills / t.losses).toFixed(2) : +(t.kills || 0).toFixed(2),
+            winRate:   +(t.wins / rounds).toFixed(4),
+            hsRate:    t.kills > 0 ? +(t.headshotKills / t.kills).toFixed(4) : 0,
+            avgDamage: +((t.damageDealt || 0) / rounds).toFixed(1),
+            top10Rate: +((t.top10s || 0) / rounds).toFixed(4),
+            assists:   t.assists   || 0,
+            dBNOs:     t.dBNOs    || 0,
           };
-        });
-        return jsonRes(res, { players: out, seasonId: cache.seasonId, savedAt: cache.savedAt });
+        }
+        return jsonRes(res, { players: out, builtAt: cache.savedAt || null, seasonId: cache.seasonId || null });
+      }
+
+      // AI-generated spotlight insights — written by scripts/generate_ai_insights.js
+      // during the daily run. Cache only — never re-generates on request.
+      if (req.method === 'GET' && p === '/api/ai-insights') {
+        const AI_FILE = path.join(DATA, 'ai_insights_cache.json');
+        if (!fs.existsSync(AI_FILE)) return errRes(res, 'No AI insights cache yet — runs nightly via daily_clan.js', 404);
+        return jsonRes(res, JSON.parse(fs.readFileSync(AI_FILE, 'utf8')));
       }
 
       // Weapon stats — per-player weapon kill summary from telemetry
@@ -403,8 +322,19 @@ async function router(req, res) {
         return jsonRes(res, buildSummary(cache, members));
       }
 
+      // Clan branding/config — non-secret subset for the frontend
+      if (req.method === 'GET' && p === '/api/config') {
+        return jsonRes(res, frontendClanConfig());
+      }
+
+      // Discord Gateway status
+      if (req.method === 'GET' && p === '/api/gateway/status') {
+        return jsonRes(res, gatewayState());
+      }
+
       // Notifier status + manual trigger
-      if (req.method === 'GET' && p === '/api/notifier/status') {
+      if (req.method === 'GET' && (p === '/api/notifier/status' || p === '/api/notifier/state')) {
+        if (!requireAdmin(req, res)) return;
         const env = loadEnv();
         return jsonRes(res, {
           ...notifierState,
@@ -412,7 +342,8 @@ async function router(req, res) {
         });
       }
       if (req.method === 'POST' && p === '/api/notifier/scan') {
-        notifierScan().catch(e => console.error('[APES] Manual notifier scan error:', e.message));
+        if (!requireAdmin(req, res)) return;
+        notifierScan().catch(e => console.error('[3PI] Manual notifier scan error:', e.message));
         return jsonRes(res, { ok: true, message: 'Scan triggered' });
       }
 
@@ -422,7 +353,7 @@ async function router(req, res) {
       if (!res.writableEnded) await handleMatches(req, res, url);
       if (!res.writableEnded) errRes(res, 'Not found', 404);
     } catch (e) {
-      console.error('[APES] Unhandled error:', e.message);
+      console.error('[3PI] Unhandled error:', e.message);
       errRes(res, 'Internal server error', 500);
     }
     return;
@@ -433,14 +364,38 @@ async function router(req, res) {
     return serveStatic(res, path.join(BASE, 'overlay.html'));
   }
 
-  // ── Static files ────────────────────────────────────────────────────────────
-  if (p === '/' || p === '/index.html') {
-    return serveStatic(res, path.join(BASE, 'index.html'));
+  // ── Dynamic PWA manifest (built from clan config) ───────────────────────────
+  if (p === '/manifest.json') {
+    const c = loadClanConfig();
+    const manifest = {
+      name:             c.clan.name,
+      short_name:       c.clan.shortName,
+      description:      `PUBG clan statistics for ${c.clan.name}`,
+      start_url:        '/',
+      display:          'standalone',
+      background_color: '#070b12',
+      theme_color:      '#070b12',
+      orientation:      'any',
+      icons: [
+        { src: '/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any maskable' },
+        { src: '/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' },
+      ],
+      categories:  ['games', 'sports'],
+      screenshots: [],
+    };
+    return jsonRes(res, manifest);
   }
 
-  // Anything else in project root (icons, manifest, etc.)
-  const safePath = path.join(BASE, p.replace(/^\//, ''));
-  if (fs.existsSync(safePath) && fs.statSync(safePath).isFile()) {
+  // ── Static files ────────────────────────────────────────────────────────────
+  // index.html is served with clan branding injected (title, boot screen,
+  // window.__CLAN_CONFIG__) so the frontend reads from the single config source.
+  if (p === '/' || p === '/index.html') {
+    return serveIndex(res);
+  }
+
+  // Public static allow-list only. Do not expose source, config, docs, or .env.
+  const safePath = publicStaticPath(p);
+  if (safePath && fs.existsSync(safePath) && fs.statSync(safePath).isFile()) {
     return serveStatic(res, safePath);
   }
 
@@ -450,54 +405,120 @@ async function router(req, res) {
 // ── Global error guards — prevent unhandled rejections/exceptions from crashing ─
 // Node v15+ treats unhandledRejection as fatal by default. Log and stay alive.
 process.on('unhandledRejection', (reason, promise) => {
-  console.error('[APES] ⚠ Unhandled rejection (staying alive):', reason?.message || reason);
+  console.error('[3PI] ⚠ Unhandled rejection (staying alive):', reason?.message || reason);
 });
 process.on('uncaughtException', (err) => {
-  console.error('[APES] ⚠ Uncaught exception (staying alive):', err.message);
+  console.error('[3PI] ⚠ Uncaught exception (staying alive):', err.message);
 });
 
 // ── Start server ──────────────────────────────────────────────────────────────
 const server = http.createServer((req, res) => {
   router(req, res).catch(e => {
-    console.error('[APES] Request error:', e.message);
+    console.error('[3PI] Request error:', e.message);
     try { res.writeHead(500); res.end('Server error'); } catch {}
   });
 });
 
+// ── PID lockfile — prevent multiple instances from stacking up ────────────────
+const PID_FILE = path.join(DATA, 'server.pid');
+
+function writePid()  { try { fs.writeFileSync(PID_FILE, String(process.pid)); } catch {} }
+function clearPid()  { try { if (fs.existsSync(PID_FILE)) fs.unlinkSync(PID_FILE); } catch {} }
+
+function isOtherInstanceRunning() {
+  try {
+    const pid = parseInt(fs.readFileSync(PID_FILE, 'utf8').trim());
+    if (pid === process.pid) return false;
+    process.kill(pid, 0); // signal 0 = check if alive, throws if not
+    return true;
+  } catch {
+    return false; // PID file missing, stale, or unreadable
+  }
+}
+
+if (isOtherInstanceRunning()) {
+  console.error(`[3PI] Another instance is already running (PID in ${PID_FILE}) — exiting.`);
+  process.exit(0);
+}
+writePid();
+process.on('exit',    clearPid);
+process.on('SIGINT',  () => { clearPid(); process.exit(0); });
+process.on('SIGTERM', () => { clearPid(); process.exit(0); });
+
 // Handle port-in-use gracefully — launchd may restart before the OS releases the port
+// Limited to 3 retries to prevent infinite loops if the PID check races
+let _portRetries = 0;
+const MAX_PORT_RETRIES = 3;
+
 server.on('error', (err) => {
   if (err.code === 'EADDRINUSE') {
-    console.error(`[APES] Port ${PORT} in use — retrying in 5s…`);
+    _portRetries++;
+    if (_portRetries > MAX_PORT_RETRIES) {
+      console.error(`[3PI] Port ${PORT} still in use after ${MAX_PORT_RETRIES} retries — giving up.`);
+      clearPid();
+      process.exit(1);
+    }
+    console.error(`[3PI] Port ${PORT} in use — retry ${_portRetries}/${MAX_PORT_RETRIES} in 5s…`);
     setTimeout(() => {
       server.close();
       server.listen(PORT, '127.0.0.1');
     }, 5000);
   } else {
-    console.error('[APES] Server error:', err.message);
+    console.error('[3PI] Server error:', err.message);
   }
 });
 
 server.listen(PORT, '127.0.0.1', () => {
-  console.log(`[APES] 🎮 Clan Stats running → http://localhost:${PORT}`);
+  console.log(`[3PI] 🎮 Clan Stats running → http://localhost:${PORT}`);
 
-  function diskCacheHasRealStats() {
-    try {
-      const STATS_FILE = path.join(DATA, 'stats_cache.json');
-      const cached = JSON.parse(fs.readFileSync(STATS_FILE, 'utf8'));
-      return cached?.stats?.some(s => {
-        const gms = s.season?.data?.attributes?.gameModeStats;
-        return (gms?.squad?.roundsPlayed > 0) || (gms?.['squad-fpp']?.roundsPlayed > 0);
-      });
-    } catch { return false; }
-  }
-
+  const hasCache = diskCacheHasRealStats();
   // If disk cache is good, wait 3 minutes before prewarm (rate limit recovery window).
   // If no disk cache, wait 90 seconds (let any current rate-limit window roll over).
-  const startupDelay = diskCacheHasRealStats() ? 3 * 60 * 1000 : 90 * 1000;
-  console.log(`[APES] ⏳ Prewarm scheduled in ${startupDelay/1000}s (${diskCacheHasRealStats() ? 'disk cache exists' : 'no disk cache'})`);
+  const startupDelay = hasCache ? 3 * 60 * 1000 : 90 * 1000;
+  console.log(`[3PI] ⏳ Prewarm scheduled in ${startupDelay/1000}s (${hasCache ? 'disk cache exists' : 'no disk cache'})`);
   // Wrap in .catch() so a prewarm failure never becomes an unhandled rejection
-  setTimeout(() => prewarmStats().catch(e => console.error('[APES] Prewarm failed:', e.message)), startupDelay);
+  setTimeout(() => prewarmStats().catch(e => console.error('[3PI] Prewarm failed:', e.message)), startupDelay);
 
-  // Start Discord notifier (polls every 5 min for new achievements)
-  startNotifier();
+  // Start Discord notifier (polls every 5 min for new achievements).
+  // When new matches are detected, schedule a prewarm ~45 s later so stats
+  // are current within ~5-10 min of a game ending rather than up to 2 hours.
+  let _prewarmScheduled = false;
+  startNotifier({
+    onNewMatches: (count) => {
+      if (_prewarmScheduled) {
+        console.log(`[3PI] [notifier] ${count} new match(es) — prewarm already scheduled, skipping`);
+        return;
+      }
+      _prewarmScheduled = true;
+      console.log(`[3PI] [notifier] ${count} new match(es) detected — prewarm in 45 s`);
+      setTimeout(() => {
+        _prewarmScheduled = false;
+        if (!prewarm.running) {
+          console.log('[3PI] [notifier] Triggering prewarm after new match detection');
+          prewarmStats()
+            .then(() => {
+              const { buildMatchHistory } = require('./scripts/build_match_history');
+              buildMatchHistory({ verbose: false });
+              console.log('[3PI] [notifier] Match history rebuilt after notifier-triggered prewarm');
+            })
+            .catch(e => console.error('[3PI] Notifier-triggered prewarm/history rebuild failed:', e.message));
+        } else {
+          console.log('[3PI] [notifier] Prewarm already running — skipping notifier-triggered prewarm');
+        }
+      }, 45_000);
+    },
+  });
+
+  // Start Discord Gateway (WebSocket) for role-based auto-add/remove.
+  // Clan wiring (guild + membership role) comes from config/clan.config.json;
+  // secrets (bot token, webhook) stay in .env.
+  const gwEnv = loadEnv();
+  const clan  = loadClanConfig();
+  startGateway({
+    botToken:    gwEnv.DISCORD_BOT_TOKEN,
+    guildId:     clan.discord.guildId,
+    roleName:    clan.discord.membershipRole,
+    webhookUrl:  gwEnv.DISCORD_WEBHOOK_URL,
+    membersFile: path.join(DATA, 'members.json'),
+  });
 });

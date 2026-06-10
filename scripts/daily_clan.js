@@ -1,24 +1,32 @@
 #!/usr/bin/env node
 'use strict';
 // ── daily_clan.js ─────────────────────────────────────────────────────────────
-// Daily orchestrator for APES clan automated tasks.
+// Daily orchestrator for the clan clan automated tasks.
 // Run via Cowork scheduled task at 6am daily.
 //
 // Add new daily tasks below in the TASKS array — each task is an async function
 // that returns a summary string on success or throws on failure.
 
 const http = require('http');
-const { computeTrends }    = require('./compute_trends');
-const { computeAnalysis }  = require('./compute_analysis');
+const fs   = require('fs');
+const path = require('path');
 const { fetchWeaponStats }   = require('./fetch_weapon_stats');
+const { fetchRecentMatches } = require('./fetch_recent_matches');
+const { backfillTelemetry }  = require('./backfill_telemetry');
+const { verifyIntegrity }    = require('./verify_integrity');
 const { buildMatchHistory }    = require('./build_match_history');
 const { buildSquadStats }      = require('./build_squad_stats');
 const { buildLandingHeatmap }  = require('./build_landing_heatmap');
+const { buildTelemetryInsights } = require('./build_telemetry_insights');
 const { checkMilestones }      = require('./check_milestones');
 const { execFileSync }         = require('child_process');
+const { PORT }                 = require('../lib/config');
 
-const PORT = process.env.PUBG_PORT ? parseInt(process.env.PUBG_PORT) : 3002;
-const PREWARM_TIMEOUT_MS = 7 * 60 * 1000; // 7 min — enough for a full 29-player prewarm
+// 12 min ceiling — the prewarm itself takes ~10 min for a 39-player roster,
+// observed 9.87 min on 2026-05-11. The previous 7-min ceiling was hardcoded
+// for a 29-player roster and now consistently throws a false-timeout error
+// even though the prewarm completes and downstream caches refresh fine.
+const PREWARM_TIMEOUT_MS = 12 * 60 * 1000;
 const POLL_INTERVAL_MS   = 5000;
 
 // ── HTTP helpers (no external deps) ──────────────────────────────────────────
@@ -67,7 +75,25 @@ async function waitForPrewarm() {
 // ─────────────────────────────────────────────────────────────────────────────
 // TASKS — add new daily clan automations here
 // ─────────────────────────────────────────────────────────────────────────────
+const MEMBERS_FILE    = path.join(__dirname, '..', 'data', 'members.json');
+const GRACE_PERIOD_MS = 14 * 24 * 60 * 60 * 1000; // 14 days
+
 const TASKS = [
+
+  {
+    name: 'Purge Expired Departures',
+    run: async () => {
+      const raw     = fs.readFileSync(MEMBERS_FILE, 'utf8');
+      const members = JSON.parse(raw);
+      const now     = Date.now();
+      const expired = members.filter(m => m.removedAt && (now - new Date(m.removedAt).getTime()) >= GRACE_PERIOD_MS);
+      if (!expired.length) return 'no expired departures';
+
+      const kept = members.filter(m => !m.removedAt || (now - new Date(m.removedAt).getTime()) < GRACE_PERIOD_MS);
+      fs.writeFileSync(MEMBERS_FILE, JSON.stringify(kept, null, 2));
+      return `hard-deleted ${expired.length} member(s): ${expired.map(m => m.name).join(', ')}`;
+    },
+  },
 
   {
     name: 'Refresh PUBG Stats',
@@ -91,27 +117,18 @@ const TASKS = [
   },
 
   {
-    name: 'Compute Trends',
+    name: 'Hydrate Recent Matches',
     run: async () => {
-      const result = computeTrends();
-      const top = Object.entries(result.correlations)
-        .filter(([, r]) => r !== null)
-        .sort(([, a], [, b]) => Math.abs(b) - Math.abs(a))[0];
-      const topLabel = top ? `${top[0]} r=${top[1].toFixed(2)}` : 'no correlations';
-      return `${result.playerCount} players · strongest: ${topLabel}`;
+      const result = await fetchRecentMatches({ verbose: true });
+      return `${result.uniqueRefs} refs · ${result.fetched} fetched · ${result.errors} errors`;
     },
   },
 
   {
-    name: 'Compute Analysis',
+    name: 'Backfill Telemetry',
     run: async () => {
-      const result = computeAnalysis();
-      // Find strongest non-circular correlation
-      const top = Object.entries(result.correlations)
-        .filter(([, c]) => c.r !== null)
-        .sort(([, a], [, b]) => Math.abs(b.r) - Math.abs(a.r))[0];
-      const topLabel = top ? `${top[1].label} r=${top[1].r.toFixed(2)}` : 'no correlations';
-      return `${result.playerCount} players · ${result.insights.length} insights · strongest: ${topLabel}`;
+      const r = await backfillTelemetry({ verbose: false });
+      return `${r.fetched} fetched · ${r.failed} failed · coverage ~${(r.coverage * 100).toFixed(1)}% (${r.eligible} eligible)`;
     },
   },
 
@@ -152,6 +169,26 @@ const TASKS = [
   },
 
   {
+    name: 'Build Telemetry Playbook',
+    run: async () => {
+      const result = buildTelemetryInsights({ verbose: true });
+      const cards = result.cards?.length || 0;
+      const matches = result.coverage?.telemetryMatches || 0;
+      const total = result.coverage?.officialMatches || 0;
+      return `${cards} cards · ${matches}/${total} matches with telemetry`;
+    },
+  },
+
+  {
+    name: 'Verify Data Integrity',
+    run: async () => {
+      const r = verifyIntegrity({ verbose: true });
+      if (!r.ok) throw new Error(`${r.errors.length} integrity error(s): ${r.errors.slice(0, 3).join(' | ')}${r.errors.length > 3 ? ' …' : ''}`);
+      return `clean — ${r.players} players · ${r.uniqueGames} season matches recomputed exactly · ${r.warnings.length} warning(s)`;
+    },
+  },
+
+  {
     name: 'Check Milestones',
     run: async () => {
       const result = await checkMilestones({ verbose: true });
@@ -159,6 +196,11 @@ const TASKS = [
       return `${result.posted || 0} milestone(s) posted · ${result.total || 0} found`;
     },
   },
+
+  // NOTE: AI spotlight synthesis still belongs to the surrounding Cowork
+  // scheduled task, but it is intentionally not part of this Node pipeline.
+  // Phase A here stays deterministic; the scheduled-task instruction performs
+  // Phase B with summarize_for_ai.js after these cache builders finish.
 
   // ── Sunday-only: post weekly digest to Discord ───────────────────────────
   // Runs every Sunday after all data tasks are fresh.
@@ -184,10 +226,49 @@ const TASKS = [
 ];
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ── Pipeline status + failure alerting ────────────────────────────────────────
+// data/pipeline_status.json is the authoritative "did the pipeline complete
+// today" record — the 6AM Cowork task's freshness check reads it, so a dead
+// pipeline can't hide behind notifier-refreshed caches (the 6/2–6/10 outage).
+const STATUS_FILE = path.join(__dirname, '..', 'data', 'pipeline_status.json');
+
+function writeStatusFile(payload) {
+  try {
+    const tmp = STATUS_FILE + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(payload, null, 2));
+    fs.renameSync(tmp, STATUS_FILE);
+  } catch (e) {
+    console.warn('[3PI Daily] Could not write pipeline_status.json:', e.message);
+  }
+}
+
+// Best-effort Discord alert when any step fails — never throws, never blocks exit.
+async function alertFailures(results) {
+  try {
+    const { loadEnv } = require('../lib/config');
+    const { postWebhook } = require('../lib/discord');
+    const webhookUrl = loadEnv().DISCORD_WEBHOOK_URL;
+    if (!webhookUrl) return;
+    const failed = results.filter(r => !r.ok);
+    if (!failed.length) return;
+    await postWebhook(webhookUrl, {
+      embeds: [{
+        title: `⚠️ Daily pipeline: ${failed.length} step(s) failed`,
+        description: failed.map(f => `**${f.task}** — ${String(f.error).slice(0, 180)}`).join('\n'),
+        footer: { text: 'See ~/Library/Logs/clan-daily-pipeline.log on the host' },
+        color: 0xf87171,
+      }],
+    });
+    console.log(`[3PI Daily] Posted failure alert for ${failed.length} step(s)`);
+  } catch (e) {
+    console.warn('[3PI Daily] Could not post failure alert:', e.message);
+  }
+}
+
 async function main() {
   const started = Date.now();
   console.log(`\n${'═'.repeat(56)}`);
-  console.log(`[APES Daily] ${new Date().toLocaleString()}  —  ${TASKS.length} task(s)`);
+  console.log(`[3PI Daily] ${new Date().toLocaleString()}  —  ${TASKS.length} task(s)`);
   console.log(`${'═'.repeat(56)}`);
 
   const results = [];
@@ -198,25 +279,36 @@ async function main() {
       const summary = await task.run();
       const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
       console.log(`[${task.name}] ✓ ${summary} (${elapsed}s)`);
-      results.push({ task: task.name, ok: true, summary });
+      results.push({ task: task.name, ok: true, summary, secs: +elapsed });
     } catch (e) {
       const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
       console.error(`[${task.name}] ✗ ${e.message} (${elapsed}s)`);
-      results.push({ task: task.name, ok: false, error: e.message });
+      results.push({ task: task.name, ok: false, error: e.message, secs: +elapsed });
     }
   }
 
   const totalSecs = ((Date.now() - started) / 1000).toFixed(1);
   const passed = results.filter(r => r.ok).length;
   console.log(`\n${'─'.repeat(56)}`);
-  console.log(`[APES Daily] Done in ${totalSecs}s — ${passed}/${results.length} tasks OK`);
+  console.log(`[3PI Daily] Done in ${totalSecs}s — ${passed}/${results.length} tasks OK`);
   console.log(`${'─'.repeat(56)}\n`);
 
   const anyFailed = results.some(r => !r.ok);
+  writeStatusFile({
+    date:       new Date().toISOString().slice(0, 10),
+    startedAt:  new Date(started).toISOString(),
+    finishedAt: new Date().toISOString(),
+    totalSecs:  +totalSecs,
+    allOk:      !anyFailed,
+    passed,
+    total:      results.length,
+    results,
+  });
+  if (anyFailed) await alertFailures(results);
   process.exit(anyFailed ? 1 : 0);
 }
 
 main().catch(e => {
-  console.error('[APES Daily] Fatal:', e.message);
+  console.error('[3PI Daily] Fatal:', e.message);
   process.exit(1);
 });
