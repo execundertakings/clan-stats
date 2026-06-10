@@ -19,25 +19,28 @@ Schedule: daily, **06:00 local** (pipeline launchd runs at 05:00 so data is fres
 
 ## Freshness check — do this first
 
-Before running Phase B, verify the 5am pipeline wrote **ALL** of its outputs today — not just match history. The server's notifier rebuilds `match_history_cache.json` on its own whenever it spots new matches, so that one file being fresh does NOT prove the pipeline ran. (This exact gap masked an 8-day pipeline outage, 2026-06-02 → 06-10: match history stayed fresh while weapon/squad/landing/telemetry/milestone caches silently froze.)
+Before running Phase B, verify the 5am pipeline actually completed today. The pipeline writes `data/pipeline_status.json` at the end of every run (date, per-step results, `allOk`) — that file is the authoritative record. Do NOT judge freshness from `match_history_cache.json` alone: the server's notifier rebuilds that file on its own, which masked an 8-day pipeline outage (2026-06-02 → 06-10).
 
 ```
 cd "/Users/jean/Documents/Clan stats page" && node -e "
 const fs=require('fs');
-const files=['match_history_cache.json','weapon_cache.json','squad_stats_cache.json','landing_cache.json','telemetry_insights_cache.json'];
 const today=new Date().toISOString().slice(0,10);
-let stale=0;
-for(const f of files){
-  const m=fs.statSync('data/'+f).mtime.toISOString();
-  const ok=m.slice(0,10)===today;
-  if(!ok)stale++;
-  console.log((ok?'OK   ':'STALE')+' '+f+' '+m);
+let s=null; try{s=JSON.parse(fs.readFileSync('data/pipeline_status.json','utf8'));}catch{}
+if(s && s.date===today && s.allOk){console.log('PIPELINE OK — '+s.passed+'/'+s.total+' steps, finished '+s.finishedAt);process.exit(0);}
+if(s && s.date===today){console.log('PIPELINE RAN WITH FAILURES today:');s.results.filter(r=>!r.ok).forEach(r=>console.log('  ✗ '+r.task+': '+r.error));process.exit(2);}
+console.log('PIPELINE DID NOT RUN today (status file '+(s?('dated '+s.date):'missing')+') — falling back to cache mtimes:');
+for(const f of ['match_history_cache.json','weapon_cache.json','squad_stats_cache.json','landing_cache.json','telemetry_insights_cache.json']){
+  try{const m=fs.statSync('data/'+f).mtime.toISOString();console.log((m.slice(0,10)===today?'OK   ':'STALE')+' '+f+' '+m);}catch{console.log('MISSING '+f);}
 }
-console.log(stale?stale+' STALE — pipeline did not complete today':'all fresh');
+process.exit(1);
 "
 ```
 
-If ANY file is STALE, the launchd pipeline didn't complete today. Recover:
+- **PIPELINE OK** → proceed to Phase B.
+- **PIPELINE RAN WITH FAILURES** → if only non-critical steps failed (Backfill Telemetry, Check Milestones, Weekly Digest), proceed to Phase B and note the failures in your report. If a builder step failed (Match History / Squad / Landing / Weapon / Verify Data Integrity), recover below first.
+- **PIPELINE DID NOT RUN** → recover below.
+
+Recovery:
 
 1. Check the pipeline log for the failure: `tail -20 ~/Library/Logs/clan-daily-pipeline.log`
 2. Check the server is up: `curl -s http://localhost:3002/api/health`
@@ -49,9 +52,9 @@ If ANY file is STALE, the launchd pipeline didn't complete today. Recover:
    Expect ~15–18 min for a 37-member roster. If `launchctl kickstart` itself fails, fall back to running node directly:
    `nohup /opt/homebrew/bin/node "/Users/jean/Documents/Clan stats page/scripts/daily_clan.js" > /tmp/clan_daily.log 2>&1 &`
    — node, **never via bash** (`bash script.sh` on the external volume is TCC-blocked in launchd contexts; that was the 6/2–6/10 outage).
-4. Re-run the freshness check. Once everything is fresh from today, proceed to Phase B.
+4. Re-run the freshness check. Once it reports PIPELINE OK, proceed to Phase B.
 
-If everything IS fresh from today, skip straight to Phase B.
+**Early-season note:** in the first days after a season rollover, `summarize_for_ai.js` exits with "too few players with ≥5 games". That is expected, not a failure — skip Phase B gracefully (write no cards, leave the existing caches untouched), note it in the report, and continue with Phases C and D.
 
 ---
 
