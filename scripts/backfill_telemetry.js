@@ -77,9 +77,12 @@ async function backfillTelemetry(opts = {}) {
       fetched++;
       if (verbose) console.log(`  [backfill] ✓ ${m.matchId}`);
     } catch (e) {
-      state.failures[m.matchId] = (state.failures[m.matchId] || 0) + 1;
+      // 403/404 = CDN URL expired — permanent, skip immediately instead of
+      // burning two more runs' attempts on it.
+      const permanent = /HTTP 40[34]\b/.test(e.message);
+      state.failures[m.matchId] = permanent ? MAX_FAILURES : (state.failures[m.matchId] || 0) + 1;
       failed++;
-      if (verbose) console.warn(`  [backfill] ✗ ${m.matchId} (attempt ${state.failures[m.matchId]}/${MAX_FAILURES}): ${e.message}`);
+      if (verbose) console.warn(`  [backfill] ✗ ${m.matchId} (${permanent ? 'expired — permanent skip' : `attempt ${state.failures[m.matchId]}/${MAX_FAILURES}`}): ${e.message}`);
     }
   }
 

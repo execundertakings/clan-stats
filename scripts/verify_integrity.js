@@ -32,15 +32,23 @@ function readJsonSafe(file, fallback = null) {
 }
 
 // ── Check 1: exact recompute of match_history_cache totals ───────────────────
-function recomputeFromMatchCache(members, seasonStartAt) {
+// builtAtMs: only consider match files already on disk when the builder ran —
+// the server's notifier fetches new matches continuously, so a match landing
+// between Build Match History and this step would otherwise read as a phantom
+// +1 drift (observed on the first live run, 2026-06-10: Negromantia +1).
+function recomputeFromMatchCache(members, seasonStartAt, builtAtMs) {
   const idSet = new Set(members.map(m => m.accountId));
   const perPlayer = {};
   for (const id of idSet) perPlayer[id] = [];
 
   for (const file of fs.readdirSync(MATCH_DIR)) {
     if (!file.endsWith('.json')) continue;
+    const full = path.join(MATCH_DIR, file);
+    if (builtAtMs) {
+      try { if (fs.statSync(full).mtimeMs > builtAtMs) continue; } catch { continue; }
+    }
     let raw;
-    try { raw = JSON.parse(fs.readFileSync(path.join(MATCH_DIR, file), 'utf8')); } catch { continue; }
+    try { raw = JSON.parse(fs.readFileSync(full, 'utf8')); } catch { continue; }
     const attr = raw.data?.attributes || {};
     if (!getMatchFilterDecision(attr).counts) continue;
     if (!isCurrentSeasonMatch(attr.createdAt, seasonStartAt)) continue;
@@ -57,7 +65,7 @@ function recomputeFromMatchCache(members, seasonStartAt) {
       if (!id || !idSet.has(id)) continue;
       const roster = partToRoster[part.id];
       perPlayer[id].push({
-        matchId:   raw.data?.id || file.replace('.json', ''),
+        matchId:   raw.data?.id || path.basename(file, '.json'),
         date:      attr.createdAt,
         placement: roster?.attributes?.stats?.rank || null,
         won:       roster?.attributes?.won === 'true',
@@ -97,7 +105,8 @@ function checkMatchHistory(errors, warnings) {
   if (!members.length) { errors.push('members.json missing or empty'); return; }
 
   const seasonStartAt = cache.seasonStartAt || season.seasonStartAt || null;
-  const perPlayer = recomputeFromMatchCache(members, seasonStartAt);
+  const builtAtMs = cache.builtAt ? new Date(cache.builtAt).getTime() : 0;
+  const perPlayer = recomputeFromMatchCache(members, seasonStartAt, builtAtMs);
 
   const FIELDS = ['roundsPlayed', 'kills', 'wins', 'losses', 'top10s', 'damageDealt',
                   'headshotKills', 'assists', 'dBNOs', 'timeSurvived', 'roundMostKills', 'maxRoundDamage'];
