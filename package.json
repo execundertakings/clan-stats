@@ -1,13 +1,15 @@
 {
   "name": "clan-stats-page",
   "version": "1.0.0",
-  "description": "",
+  "description": "Self-hosted PUBG statistics and coaching dashboard for the 3PI clan",
   "main": "server.js",
   "directories": {
     "lib": "lib"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "npm run test:syntax && node --test test/*.test.js",
+    "test:syntax": "node scripts/check_syntax.js",
+    "test:live": "node scripts/smoke_endpoints.js",
     "start": "node server.js",
     "build": "node build.js && npx tailwindcss -i ./src/styles.css -o ./dist/styles.css --minify"
   },

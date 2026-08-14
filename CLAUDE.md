@@ -227,9 +227,9 @@ The Gateway starts automatically with the server. Status is available at `GET /a
 | GET | `/api/notifier/status` | server.js | Notifier status (admin) |
 | POST | `/api/notifier/scan` | server.js | Trigger manual notifier scan (admin) |
 
-**Removed (2026-06-10):** `/api/trends` — trends are computed client-side from `resolvedStats`; its `trends_cache.json` was dead since April. Note `/api/analysis` is NOT deprecated: it serves `analysis_cache.json` (the AI per-player profiles written by the daily task's Phase B5) and is consumed by `app.js` for player-card profiles.
+**Removed (2026-06-10):** `/api/trends` — trends are computed client-side from `resolvedStats`; its `trends_cache.json` was dead since April. Note `/api/analysis` is NOT deprecated: it serves `analysis_cache.json` (the AI per-player profiles written by the weekly task's Phase B5) and is consumed by `app.js` for player-card profiles.
 
-**Pipeline health:** `data/pipeline_status.json` is written atomically at the end of every `daily_clan.js` run (date, per-step results, `allOk`). The 6AM Cowork task's freshness check reads it; any failed step also posts a Discord alert. The pipeline includes a `Verify Data Integrity` step (`scripts/verify_integrity.js`) that exactly recomputes all player totals from `match_cache/` and schema-validates the AI caches, and a `Backfill Telemetry` step (`scripts/backfill_telemetry.js`, 40 fetches/run) that converges telemetry coverage. Season rollovers are detected by the prewarm (provisional boundary = most recent Wednesday 08:30 UTC) and announced on Discord — verify against patch notes and add the real boundary to `lib/season-boundaries.js`.
+**Pipeline health:** `data/pipeline_status.json` is written atomically at the end of every `daily_clan.js` run (date, per-step results, `allOk`). The Saturday 6AM Cowork task's freshness check reads it; any failed step also posts a Discord alert. The pipeline includes a `Verify Data Integrity` step (`scripts/verify_integrity.js`) that exactly recomputes all player totals from `match_cache/` and schema-validates the AI caches, and a `Backfill Telemetry` step (`scripts/backfill_telemetry.js`, 40 fetches/run) that converges telemetry coverage. Season rollovers are detected by the prewarm (provisional boundary = most recent Wednesday 08:30 UTC) and announced on Discord — verify against patch notes and add the real boundary to `lib/season-boundaries.js`.
 
 **Admin auth:** Hidden Settings actions are server-protected, not just UI-gated. The frontend verifies through `POST /api/admin/verify`, then sends `X-Admin-Password` for admin actions and admin-only status reads. The server compares against `ADMIN_PASSWORD_HASH` (SHA-256 hex) from process env or `.env`, with a legacy fallback only for continuity. Rotate this hash if the old frontend bundle may have exposed the password hash.
 
@@ -268,9 +268,9 @@ If a report needs a code change or a roster change, it stays `needs_human` for G
 
 ---
 
-## Daily automation — `daily-clan` Cowork scheduled task
+## Automation — daily pipeline + weekly Cowork synthesis
 
-Single scheduled task, runs at **6 AM daily**. Two phases. The version-controlled mirror of the live task description lives at `scheduled-tasks/daily-clan.skill.md` — keep it in sync with whatever Cowork is actually running.
+The deterministic pipeline runs from launchd at **5:00 AM daily** (`com.greg.clan-daily-pipeline`). A separate Cowork scheduled task runs at **6:00 AM Saturdays** for AI synthesis and housekeeping. Its version-controlled instructions live at `scheduled-tasks/daily-clan.skill.md` and must stay in sync with the live Cowork task.
 
 ### Phase A — deterministic Node pipeline (`scripts/daily_clan.js`)
 
@@ -292,7 +292,7 @@ Single scheduled task, runs at **6 AM daily**. Two phases. The version-controlle
 
 ### Phase B — AI spotlight synthesis (Claude, in-task)
 
-After Phase A finishes, Claude (executing the scheduled task) synthesises three "spotlight" insight cards for the Trends tab:
+After confirming Saturday's Phase A pipeline completed successfully, Claude (executing the weekly Cowork task) synthesises three "spotlight" insight cards for the Trends tab:
 
 1. Run `scripts/summarize_for_ai.js` → emits a compact JSON summary to stdout (player snapshots, clan aggregates, top squad pairs/trios, recent milestones, last 30 days of past spotlight themes for anti-repetition).
 2. Claude reads the summary and writes 3 cards to `data/ai_insights_cache.json`.
@@ -314,6 +314,8 @@ The frontend reads the resulting cache via `GET /api/ai-insights` and renders th
 | In-memory — player cache | 15 min | Match ID list |
 
 Fallback chain on rate limit: fresh in-memory → disk cache (any age) → stale in-memory → error.
+
+All PUBG requests share a cross-process sliding-window limiter (`lib/pubg-rate-limiter.js`) capped at 9 RPM, leaving one request of headroom under PUBG's 10 RPM free-tier limit. Retries also reacquire a shared slot.
 
 ---
 
@@ -345,6 +347,7 @@ Secrets stay in `.env` at project root (not committed) — kept separate from cl
 2. Frontend changes → rebuild: run `node build.js` on host Mac (via `mcp__Macos__Shell`)
 3. Backend changes → restart server (or it hot-reads most JSON data on each request)
 4. View at `http://localhost:3002`
+5. Run `npm test` for syntax and unit tests; run `npm run test:live` while the server is up for the API smoke sweep
 
 ---
 

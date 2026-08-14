@@ -2,12 +2,15 @@
 
 > Living snapshot for AI-agent handoff. Companion to CLAUDE.md (static instructions). Update at checkpoints: what's done, what's in flight, what's decided, what's next. Keep it tight — prune stale entries.
 
-Last updated: 2026-07-17
+Last updated: 2026-08-14
 
 ## Current state
-Self-hosted PUBG clan stats site for the 3PI (Third Party Incorporated) clan, at localhost:3002 (Cloudflare-tunneled to 3pi.executiveundertakings.com). React (CDN UMD) + Tailwind frontend built via esbuild → `dist/bundle.js`; zero-dependency Node backend (`server.js` + `routes/` + `lib/`). Project files live on `/Volumes/Storage/Clan stats page/` (external drive) with a `~/Documents` symlink. Healthy; a single 6AM `daily-clan` Cowork scheduled task drives the whole pipeline. Architecture is mature after a multi-phase refactor onto the `resolvedStats` single-source-of-truth trunk.
+Self-hosted PUBG clan stats site for the 3PI (Third Party Incorporated) clan, at localhost:3002 (Cloudflare-tunneled to 3pi.executiveundertakings.com). React (CDN UMD) + Tailwind frontend built via esbuild → `dist/bundle.js`; zero-dependency Node backend (`server.js` + `routes/` + `lib/`). Project files live on `/Volumes/Storage/Clan stats page/` (external drive) with a `~/Documents` symlink. Healthy; launchd runs the deterministic pipeline daily at 5AM, while the `daily-clan` Cowork task runs AI synthesis and housekeeping Saturdays at 6AM. Architecture is mature after a multi-phase refactor onto the `resolvedStats` single-source-of-truth trunk.
 
 ## Recently done
+- Added a cross-process PUBG API limiter capped at 9 RPM so the server/notifier and pipeline cannot collectively burst past the free-tier allowance; 429 retries reacquire a shared slot.
+- Added `npm test` (whole-project syntax checks plus unit tests) and `npm run test:live` (11-endpoint API smoke sweep).
+- Checkpointed and pushed the completed 3PI config/rebrand work; synchronized schedule documentation with the live 5AM daily + Saturday 6AM split.
 - Pipeline hardening: rollover guard, atomic `pipeline_status.json` + Discord alerts, a `verify_integrity.js` step that recomputes all player totals from `match_cache/`, and a telemetry backfill step (40 fetches/run).
 - verify_integrity now snapshots at the builder's `builtAt` to avoid a notifier race (was producing +1 phantom drift); telemetry backfill treats 403/404 as permanent skips.
 - SKILL.md freshness check now reads `pipeline_status.json`; early-season Phase B skip note added.
