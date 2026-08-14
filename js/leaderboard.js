@@ -2,9 +2,9 @@
 // perGame: function that returns a formatted per-game avg string, shown as small
 // grey sub-text below the total. Only set on cumulative columns (not ratios/maxes).
 const LB_COLS = [
-  { key: 'score', label: 'OVR', align: 'right', fmt: r => num(r.score), color: r => r.score >= 40 ? '#facc15' : r.score >= 20 ? 'var(--text-1)' : 'var(--text-2)', weight: 700,
-    title: 'Overall Rating — calculated composite: K/D (×50) + Avg Dmg (×30) + Win Rate (×20). Same formula used to pick the MVP.' },
-  { key: 'kd',           label: 'K/D',       align: 'right', fmt: r => r.kd.toFixed(2),           color: r => r.kd >= 2 ? '#4ade80' : r.kd >= 1 ? 'var(--text-1)' : '#f87171', weight: 700, title: 'Kill/Death ratio' },
+  { key: 'score', label: 'OVR', align: 'right', fmt: r => num(r.score), color: r => r.score >= 80 ? '#facc15' : r.score >= 50 ? 'var(--text-1)' : 'var(--text-2)', weight: 700,
+    title: 'Overall Rating — composite of combat (K/D, dmg, HS%), survival (top-10 rate), outcomes (win rate, close-out), squad support (assists/g + revives/g), and volume (games played). 100 ≈ elite across the board.' },
+  { key: 'kd',           label: 'K/D',       align: 'right', fmt: r => r.kd.toFixed(2),           color: r => r.kd >= 2 ? '#4ade80' : r.kd >= 1 ? 'var(--text-1)' : '#f87171', weight: 700, title: 'Kill/Death ratio — kills ÷ losses, where losses = (captured games − wins). PUBG\'s in-client K/D counts every round you died (including matches your team won but you didn\'t survive), so our number runs slightly higher than PUBG\'s display. Same methodology for every player, so internally consistent.' },
   { key: 'matches',      label: 'Matches',   align: 'right', fmt: r => num(r.matches),             color: () => 'var(--text-2)' },
   { key: 'kills',        label: 'Kills',     align: 'right', fmt: r => num(r.kills),               perGame: r => r.matches ? round(r.kills / r.matches, 1) : null },
   { key: 'assists',      label: 'Assists',   align: 'right', fmt: r => num(r.assists),             perGame: r => r.matches ? round(r.assists / r.matches, 1) : null, title: 'Damage dealt on enemies killed by a teammate' },
@@ -24,7 +24,6 @@ const LB_COLS = [
   { key: 'heals',        label: 'Heals',     align: 'right', fmt: r => num(r.heals),               perGame: r => r.matches ? round(r.heals / r.matches, 1) : null, title: 'Healing items used (medkits, bandages)' },
   { key: 'vehDestroys',  label: 'Veh💣',     align: 'right', fmt: r => num(r.vehDestroys),         color: r => r.vehDestroys >= 3 ? '#f97316' : undefined, perGame: r => r.matches ? round(r.vehDestroys / r.matches, 2) : null, title: 'Vehicles destroyed' },
   { key: 'roadKills',    label: '🚗💀',      align: 'right', fmt: r => num(r.roadKills),            color: r => r.roadKills >= 1 ? '#ef4444' : undefined, perGame: r => r.matches ? round(r.roadKills / r.matches, 2) : null, title: 'Road kills — enemies run over with a vehicle' },
-  { key: 'distance',     label: 'Dist(km)',  align: 'right', fmt: r => num(Math.round(r.distance/1000)), perGame: r => r.matches ? `${round(r.distance/1000/r.matches, 1)}` : null, title: 'Total distance travelled (walk + ride + swim) in km' },
   { key: 'days',         label: 'Days',      align: 'right', fmt: r => num(r.days),                color: r => r.days >= 10 ? '#a78bfa' : undefined, title: 'Days played this season' },
   { key: 'sigWeapon',   label: '🔫 Weapon', align: 'left',  fmt: r => r.sigWeapon || '—',           color: () => 'var(--text-2)', title: 'Signature weapon — most kills with' },
   { key: 'formDelta',  label: 'Form',      align: 'right', fmt: r => {
@@ -50,32 +49,27 @@ const LT_COLS = [
   { key: 'avgDamage', label: 'Avg Dmg',  align: 'right', fmt: r => round(r.avgDamage, 0),               title: 'Career average damage per match' },
   { key: 'hsRate',    label: 'HS%',      align: 'right', fmt: r => (r.hsRate * 100).toFixed(1) + '%',   title: 'Career headshot kill percentage' },
   { key: 'top10Rate', label: 'Top 10%',  align: 'right', fmt: r => (r.top10Rate * 100).toFixed(1) + '%', title: 'Career top-10 finish rate' },
-  { key: 'revivesPg', label: 'Rev/g',    align: 'right', fmt: r => r.revivesPg.toFixed(2),              color: r => r.revivesPg >= 0.5 ? '#60a5fa' : undefined, title: 'Teammate revives per game (career)' },
 ];
 
+const LB_SORT_KEYS = new Set(LB_COLS.map(col => col.key));
+const LT_SORT_KEYS = new Set(LT_COLS.map(col => col.key));
+
 function Leaderboard({ resolvedStats, loading, weaponData, lifetimeData }) {
-  const [sortCol, setSortCol]         = useState('kd');
-  const [sortDir, setSortDir]         = useState(-1); // -1 = desc, 1 = asc
-  const [ltView, setLtView]           = useState(false);
-  const [seasons, setSeasons]         = useState(null);   // archived season list
-  const [archiveSeason, setArchive]   = useState(null);   // currently viewing archive { seasonId, stats }
-  const [archiveLoading, setArcLoad]  = useState(false);
+  const [sortCol, setSortCol] = useState('score');
+  const [sortDir, setSortDir] = useState(-1); // -1 = desc, 1 = asc
+  const [ltView, setLtView]   = useState(false);
 
-  // Fetch season archive index once on mount
+  const seasonSortCol = LB_SORT_KEYS.has(sortCol) ? sortCol : 'score';
+  const lifetimeSortCol = LT_SORT_KEYS.has(sortCol) ? sortCol : 'kd';
+  const activeSortCol = ltView ? lifetimeSortCol : seasonSortCol;
+
   useEffect(() => {
-    api.get('/api/seasons').then(d => { if (d?.length) setSeasons(d); }).catch(() => {});
-  }, []);
-
-  // Load an archived season's full stats
-  async function loadArchive(seasonId) {
-    if (!seasonId) { setArchive(null); return; }
-    setArcLoad(true);
-    try {
-      const data = await api.get(`/api/seasons/${encodeURIComponent(seasonId)}`);
-      setArchive({ seasonId, stats: data.stats || [] });
-    } catch { setArchive(null); }
-    finally { setArcLoad(false); }
-  }
+    const expected = ltView ? lifetimeSortCol : seasonSortCol;
+    if (sortCol !== expected && (ltView ? !LT_SORT_KEYS.has(sortCol) : !LB_SORT_KEYS.has(sortCol))) {
+      setSortCol(expected);
+      setSortDir(-1);
+    }
+  }, [ltView, sortCol, seasonSortCol, lifetimeSortCol]);
 
   function handleSort(key) {
     if (sortCol === key) setSortDir(d => d * -1);
@@ -85,9 +79,15 @@ function Leaderboard({ resolvedStats, loading, weaponData, lifetimeData }) {
   const rows = useMemo(() => {
     if (!resolvedStats?.length) return [];
     return resolvedStats
-      .map(({ member, s, sApi, score, kdVal, winRate, avgDmg, avgSurvival, hsRate, boosts, heals, form }) => {
+      .map(({ member, s, score, kdVal, winRate, avgDmg, avgSurvival, hsRate,
+               boosts, heals, revives, vehicleDestroys, roadKills, longestKill,
+               days, streak, form, coverage }) => {
+        const covSummary = historyCoverageSummary(coverage);
+        const covPartial = !!(covSummary?.apiRounds && !covSummary.trusted);
         return {
           name:          member.name,
+          coverage:      covSummary,
+          covPartial,
           score,                                        // pre-computed OVR from trunk
           kills:         s?.kills || 0,
           deaths:        s?.losses || 0,
@@ -100,90 +100,47 @@ function Leaderboard({ resolvedStats, loading, weaponData, lifetimeData }) {
           winRate,                                      // pre-computed from trunk
           avgDamage:     avgDmg,                        // pre-computed from trunk
           dBNOs:         s?.dBNOs || 0,
-          revives:       sApi?.revives || 0,
+          revives,                                      // telemetry-derived (weapon_cache)
           bestKills:     s?.roundMostKills || 0,
-          streak:        sApi?.maxKillStreaks || 0,
+          streak,                                       // history-derived (roundMostKills proxy)
           hsRate,                                       // pre-computed from trunk
           avgSurvive:    avgSurvival,                   // pre-computed from trunk
-          longestKill:   sApi?.longestKill || 0,
-          boosts,                                       // pre-computed from trunk
-          heals,                                        // pre-computed from trunk
-          vehDestroys:   sApi?.vehicleDestroys || 0,
-          roadKills:     sApi?.roadKills || 0,
-          distance:      (sApi?.walkDistance || 0) + (sApi?.rideDistance || 0) + (sApi?.swimDistance || 0),
-          days:          sApi?.days || 0,
-          sigWeapon:     (() => { const w = weaponData?.[member.accountId]?.weapons?.[0]; return w ? `${w.displayName} ${w.kills}K` : null; })(),
+          longestKill,                                  // telemetry-derived (weapon_cache)
+          boosts,                                       // telemetry-derived (weapon_cache)
+          heals,                                        // telemetry-derived (weapon_cache)
+          vehDestroys:   vehicleDestroys,               // telemetry-derived (weapon_cache)
+          roadKills,                                    // telemetry-derived (weapon_cache)
+          days,                                         // history-derived (daysPlayed)
+          sigWeapon:     (() => {
+            const w = weaponData?.[member.accountId]?.weapons?.[0];
+            return w ? `${w.displayName}${w.status?.retiringSoon ? ' (42.1)' : ''} ${w.kills}K` : null;
+          })(),
           _form:         form || null,
           formDelta:     form?.delta ?? null,
         };
       })
+      .filter(r => r.matches > 0)
       .sort((a, b) => {
-        if (sortCol === 'sigWeapon') return sortDir * (a.sigWeapon || '').localeCompare(b.sigWeapon || '');
-        if (sortCol === 'formDelta') return sortDir * ((a.formDelta ?? -999) - (b.formDelta ?? -999));
-        return sortDir * (a[sortCol] - b[sortCol]);
+        if (seasonSortCol === 'sigWeapon') return sortDir * (a.sigWeapon || '').localeCompare(b.sigWeapon || '');
+        if (seasonSortCol === 'formDelta') return sortDir * ((a.formDelta ?? -999) - (b.formDelta ?? -999));
+        return sortDir * (a[seasonSortCol] - b[seasonSortCol]);
       });
-  }, [resolvedStats, sortCol, sortDir, weaponData]);
+  }, [resolvedStats, seasonSortCol, sortDir, weaponData]);
 
   // Lifetime rows — built from /api/lifetime, sorted by the same sortCol where applicable
   const ltRows = useMemo(() => {
     if (!lifetimeData?.players) return [];
     return Object.values(lifetimeData.players)
       .sort((a, b) => {
-        const aVal = a[sortCol] ?? 0;
-        const bVal = b[sortCol] ?? 0;
+        const aVal = a[lifetimeSortCol] ?? 0;
+        const bVal = b[lifetimeSortCol] ?? 0;
         if (typeof aVal === 'string') return sortDir * aVal.localeCompare(bVal);
         return sortDir * (aVal - bVal);
       });
-  }, [lifetimeData, sortCol, sortDir]);
-
-  // Archive rows — built from a loaded historical season, same shape as `rows`
-  const archiveRows = useMemo(() => {
-    if (!archiveSeason?.stats) return [];
-    return archiveSeason.stats
-      .map(({ member, season: sd }) => {
-        const s = extractStats(sd);
-        if (!s) return null;
-        return {
-          name:          member.name,
-          score:         computeScore((s.kills||0)/Math.max(s.losses||1,1), s.roundsPlayed?(s.damageDealt||0)/s.roundsPlayed:0, s.roundsPlayed?(s.wins||0)/s.roundsPlayed:0),
-          kills:         s?.kills || 0,
-          deaths:        s?.losses || 0,
-          wins:          s?.wins || 0,
-          matches:       s?.roundsPlayed || 0,
-          top10:         s?.top10s || 0,
-          assists:       s?.assists || 0,
-          headshotKills: s?.headshotKills || 0,
-          kd:            parseFloat(kd(s.kills || 0, s.losses || 0)),
-          winRate:       s?.roundsPlayed ? s.wins / s.roundsPlayed : 0,
-          avgDamage:     s?.roundsPlayed ? (s.damageDealt || 0) / s.roundsPlayed : 0,
-          dBNOs:         s?.dBNOs || 0,
-          revives:       s?.revives || 0,
-          bestKills:     s?.roundMostKills || 0,
-          streak:        s?.maxKillStreaks || 0,
-          hsRate:        s?.kills > 0 ? (s.headshotKills || 0) / s.kills : 0,
-          avgSurvive:    s?.roundsPlayed ? (s.timeSurvived || 0) / s.roundsPlayed : 0,
-          longestKill:   s?.longestKill || 0,
-          boosts:        s?.boosts || 0,
-          heals:         s?.heals || 0,
-          vehDestroys:   s?.vehicleDestroys || 0,
-          roadKills:     s?.roadKills || 0,
-          distance:      (s?.walkDistance || 0) + (s?.rideDistance || 0) + (s?.swimDistance || 0),
-          days:          s?.days || 0,
-          sigWeapon:     null,
-          _form:         null,
-          formDelta:     null,
-        };
-      })
-      .filter(Boolean)
-      .sort((a, b) => {
-        if (sortCol === 'sigWeapon') return 0;
-        if (sortCol === 'formDelta') return sortDir * ((a.formDelta ?? -999) - (b.formDelta ?? -999));
-        return sortDir * (a[sortCol] - b[sortCol]);
-      });
-  }, [archiveSeason, sortCol, sortDir]);
+  }, [lifetimeData, lifetimeSortCol, sortDir]);
 
   const activeCols = ltView ? LT_COLS : LB_COLS;
-  const activeRows = ltView ? ltRows : archiveSeason ? archiveRows : rows;
+  const activeRows = ltView ? ltRows : rows;
 
   if (loading) return <div className="p-6"><div className="skeleton h-64 rounded-xl"/></div>;
   if (!resolvedStats?.length && !rows.length) return (
@@ -197,41 +154,19 @@ function Leaderboard({ resolvedStats, loading, weaponData, lifetimeData }) {
   return (
     <div className="p-6 space-y-4">
       <div className="lb-header" style={{ padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <h2 style={{ fontSize: 18, fontWeight: 700 }}>
-            Leaderboard
-            {archiveSeason && <span style={{ fontSize: 12, fontWeight: 400, color: 'var(--text-3)', marginLeft: 8 }}>
-              — {seasons?.find(s => s.seasonId === archiveSeason.seasonId)?.label || archiveSeason.seasonId}
-            </span>}
-          </h2>
-          {archiveLoading && <span style={{ fontSize: 11, color: 'var(--text-3)' }}>loading…</span>}
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          {seasons?.length > 0 && !ltView && (
-            <select
-              value={archiveSeason?.seasonId || ''}
-              onChange={e => loadArchive(e.target.value || null)}
-              style={{ fontSize: 11, padding: '4px 8px', borderRadius: 6, background: 'var(--bg-raised)', border: '1px solid var(--border)', color: 'var(--text-2)', cursor: 'pointer' }}
-            >
-              <option value="">Current Season</option>
-              {seasons.map(s => (
-                <option key={s.seasonId} value={s.seasonId}>{s.label} — {s.activePlayers} players, {num(s.totalGames)} games</option>
-              ))}
-            </select>
-          )}
-          {lifetimeData && (
-            <div style={{ display: 'flex', gap: 0, borderRadius: 6, overflow: 'hidden', border: '1px solid var(--border)', fontSize: 11, fontWeight: 600 }}>
-              <button onClick={() => { setLtView(false); setArchive(null); }}
-                style={{ padding: '4px 12px', cursor: 'pointer', background: !ltView ? 'var(--accent)' : 'var(--bg-raised)', color: !ltView ? '#fff' : 'var(--text-2)', border: 'none' }}>
-                Season
-              </button>
-              <button onClick={() => { setLtView(true); setArchive(null); }}
-                style={{ padding: '4px 12px', cursor: 'pointer', background: ltView ? 'var(--accent)' : 'var(--bg-raised)', color: ltView ? '#fff' : 'var(--text-2)', border: 'none' }}>
-                Lifetime
-              </button>
-            </div>
-          )}
-        </div>
+        <h2 style={{ fontSize: 18, fontWeight: 700 }}>Leaderboard</h2>
+        {lifetimeData && (
+          <div style={{ display: 'flex', gap: 0, borderRadius: 6, overflow: 'hidden', border: '1px solid var(--border)', fontSize: 11, fontWeight: 600 }}>
+            <button onClick={() => setLtView(false)}
+              style={{ padding: '4px 12px', cursor: 'pointer', background: !ltView ? 'var(--accent)' : 'var(--bg-raised)', color: !ltView ? '#fff' : 'var(--text-2)', border: 'none' }}>
+              Season
+            </button>
+            <button onClick={() => setLtView(true)}
+              style={{ padding: '4px 12px', cursor: 'pointer', background: ltView ? 'var(--accent)' : 'var(--bg-raised)', color: ltView ? '#fff' : 'var(--text-2)', border: 'none' }}>
+              Lifetime
+            </button>
+          </div>
+        )}
       </div>
       <div className="stat-card p-0" style={{ overflow: 'hidden' }}>
         <div className="lb-scroll" style={{ overflowX: 'scroll', overflowY: 'visible', transform: 'rotateX(180deg)' }}>
@@ -245,24 +180,34 @@ function Leaderboard({ resolvedStats, loading, weaponData, lifetimeData }) {
                   key={col.key}
                   title={col.title}
                   style={{ textAlign: col.align, cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap',
-                    color: sortCol === col.key ? 'var(--accent)' : col.key === 'score' ? '#facc15' : undefined,
-                    background: sortCol === col.key ? 'rgba(59,130,246,.06)' : undefined }}
+                    color: activeSortCol === col.key ? 'var(--accent)' : col.key === 'score' ? '#facc15' : undefined,
+                    background: activeSortCol === col.key ? 'rgba(59,130,246,.06)' : undefined }}
                   onClick={() => handleSort(col.key)}
                 >
-                  {col.label}{sortCol === col.key ? arrow : ''}
+                  {col.label}{activeSortCol === col.key ? arrow : ''}
                 </th>
               ))}
             </tr>
           </thead>
           <tbody>
             {activeRows.map((r, i) => (
-              <tr key={r.name} style={{ background: sortCol !== 'kd' && i < 3 ? 'rgba(59,130,246,.03)' : undefined }}>
+              <tr key={r.name} style={{ background: activeSortCol !== 'score' && i < 3 ? 'rgba(59,130,246,.03)' : undefined }}>
                 <td>
                   <span style={{ fontWeight: 600 }}>
                     {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : <span style={{ color: 'var(--text-3)' }}>{i + 1}</span>}
                   </span>
                 </td>
-                <td style={{ fontWeight: 600, color: 'var(--text-1)', maxWidth: 130, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.name}</td>
+                <td style={{ fontWeight: 600, color: 'var(--text-1)', maxWidth: 150, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {r.name}
+                  {r.covPartial && (
+                    <span
+                      title={`Match cache covers ${r.coverage.usedMatches}/${r.coverage.apiRounds} of this player's season squad games (joined late — PUBG only exposes the recent slice of matches). Stats shown reflect captured games only.`}
+                      style={{ marginLeft: 6, fontSize: 9, fontWeight: 600, color: '#fbbf24', background: 'rgba(251,191,36,.10)', border: '1px solid rgba(251,191,36,.30)', padding: '1px 4px', borderRadius: 3, verticalAlign: 'middle', cursor: 'help' }}
+                    >
+                      {r.coverage.usedMatches}/{r.coverage.apiRounds}
+                    </span>
+                  )}
+                </td>
                 {activeCols.map(col => {
                   const pg = col.perGame ? col.perGame(r) : null;
                   return (
@@ -270,7 +215,7 @@ function Leaderboard({ resolvedStats, loading, weaponData, lifetimeData }) {
                       textAlign: col.align,
                       fontWeight: typeof col.weight === 'function' ? col.weight(r) : col.weight,
                       color: col.color ? col.color(r) : undefined,
-                      background: sortCol === col.key ? 'rgba(59,130,246,.04)' : undefined,
+                      background: activeSortCol === col.key ? 'rgba(59,130,246,.04)' : undefined,
                       verticalAlign: 'middle',
                       lineHeight: 1.2,
                     }}>
@@ -289,8 +234,7 @@ function Leaderboard({ resolvedStats, loading, weaponData, lifetimeData }) {
       </div>
       <p style={{ fontSize: 11, color: 'var(--text-3)' }}>
         Click any column header to sort · click again to reverse · <span style={{ opacity: 0.7 }}>grey sub-values = per-game average</span>
-        {ltView && <span style={{ marginLeft: 8, color: 'var(--accent)', opacity: 0.9 }}>· Lifetime — all modes aggregated (solo + duo + squad FPP/TPP)</span>}
-        {archiveSeason && !ltView && <span style={{ marginLeft: 8, color: '#f59e0b', opacity: 0.9 }}>· Archived season — read-only snapshot</span>}
+        {ltView && <span style={{ marginLeft: 8, color: 'var(--accent)', opacity: 0.9 }}>· Lifetime — official squad matches only (PUBG lifetime squad stats)</span>}
       </p>
     </div>
   );

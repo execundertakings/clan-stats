@@ -13,7 +13,7 @@ function useIsMobile(breakpoint = 768) {
 class ErrorBoundary extends React.Component {
   constructor(props) { super(props); this.state = { error: null }; }
   static getDerivedStateFromError(error) { return { error }; }
-  componentDidCatch(error, info) { console.error('[APES] ErrorBoundary caught:', error, info); }
+  componentDidCatch(error, info) { console.error('[3PI] ErrorBoundary caught:', error, info); }
   render() {
     if (this.state.error) {
       return (

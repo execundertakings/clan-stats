@@ -16,7 +16,9 @@ const {
   discoverClanFromPlayer,
   bulkResolvePlayers,
 } = require('../lib/pubg');
+const { prewarm, prewarmStats } = require('../lib/prewarm');
 const { DATA } = require('../lib/config');
+const { requireAdmin } = require('../lib/admin-auth');
 
 const MEMBERS_FILE  = path.join(DATA, 'members.json');
 const SEASON_FILE   = path.join(DATA, 'season.json');
@@ -49,6 +51,29 @@ function bustStatsCache() {
   try { fs.unlinkSync(STATS_FILE); } catch {}
 }
 
+// Update a single player's season entry in stats_cache.json without touching
+// other players. Called whenever fresh season stats are fetched individually
+// (e.g. after a player-level refresh) so reloads always get the fresh data.
+function patchPlayerStatsDisk(accountId, seasonId, freshSeason, freshLifetime) {
+  try {
+    if (!fs.existsSync(STATS_FILE)) return; // no cache to patch — prewarm will write it
+    const cache = JSON.parse(fs.readFileSync(STATS_FILE, 'utf8'));
+    if (!Array.isArray(cache.stats)) return;
+    const idx = cache.stats.findIndex(s => s.member?.accountId === accountId);
+    if (idx === -1) return; // player not in cache — prewarm will include them later
+    if (freshSeason  !== undefined) cache.stats[idx].season   = freshSeason;
+    if (freshLifetime !== undefined) cache.stats[idx].lifetime = freshLifetime;
+    cache.stats[idx].seasonId = seasonId || cache.stats[idx].seasonId;
+    cache.savedAt = Date.now(); // bump so staleness timer resets
+    const TMP = STATS_FILE + '.tmp';
+    fs.writeFileSync(TMP, JSON.stringify(cache, null, 2));
+    fs.renameSync(TMP, STATS_FILE);
+    console.log(`[3PI] 💾 stats_cache.json patched for ${accountId}`);
+  } catch (e) {
+    console.warn(`[3PI] Could not patch stats_cache.json for ${accountId}:`, e.message);
+  }
+}
+
 async function handlePlayers(req, res, url) {
   const { pathname, searchParams } = url;
 
@@ -59,6 +84,7 @@ async function handlePlayers(req, res, url) {
 
   // POST /api/members — add a member by name
   if (req.method === 'POST' && pathname === '/api/members') {
+    if (!requireAdmin(req, res)) return;
     const { parseBody } = require('../lib/http');
     const body = await parseBody(req);
     const name = (body.name || '').trim();
@@ -89,6 +115,7 @@ async function handlePlayers(req, res, url) {
 
   // DELETE /api/members/:name — remove a member
   if (req.method === 'DELETE' && pathname.startsWith('/api/members/')) {
+    if (!requireAdmin(req, res)) return;
     const name = decodeURIComponent(pathname.slice('/api/members/'.length));
     let members = loadMembers();
     const before = members.length;
@@ -101,6 +128,7 @@ async function handlePlayers(req, res, url) {
 
   // GET /api/players/lookup?names=foo,bar — look up players by name
   if (req.method === 'GET' && pathname === '/api/players/lookup') {
+    if (!requireAdmin(req, res)) return;
     const names = searchParams.get('names');
     if (!names) return errRes(res, 'names param required');
     try {
@@ -111,13 +139,22 @@ async function handlePlayers(req, res, url) {
     }
   }
 
-  // GET /api/players/season?accountId=...&seasonId=... — season stats
+  // GET /api/players/season?accountId=...&seasonId=...&bust=1 — season stats
+  // bust=1 bypasses in-memory cache and patches stats_cache.json on disk so
+  // a browser reload still gets the fresh season data.
   if (req.method === 'GET' && pathname === '/api/players/season') {
     const accountId = searchParams.get('accountId');
     const seasonId  = searchParams.get('seasonId');
+    const bust      = searchParams.get('bust') === '1';
     if (!accountId || !seasonId) return errRes(res, 'accountId and seasonId required');
+    if (!requireAdmin(req, res)) return;
     try {
-      const data = await getPlayerSeasonStats(accountId, seasonId);
+      const data = await getPlayerSeasonStats(accountId, seasonId, bust);
+      // Write-through to disk cache so browser reloads always get fresh data.
+      // Only patch when bust=1 (explicit refresh) to avoid thrashing the file on normal reads.
+      if (bust) {
+        patchPlayerStatsDisk(accountId, seasonId, data, undefined);
+      }
       return jsonRes(res, data);
     } catch (e) {
       return errRes(res, e.message, 500);
@@ -126,6 +163,7 @@ async function handlePlayers(req, res, url) {
 
   // GET /api/players/ranked?accountId=...&seasonId=... — ranked season stats
   if (req.method === 'GET' && pathname === '/api/players/ranked') {
+    if (!requireAdmin(req, res)) return;
     const accountId = searchParams.get('accountId');
     const seasonId  = searchParams.get('seasonId');
     if (!accountId || !seasonId) return errRes(res, 'accountId and seasonId required');
@@ -137,12 +175,20 @@ async function handlePlayers(req, res, url) {
     }
   }
 
-  // GET /api/players/lifetime?accountId=... — lifetime stats
+  // GET /api/players/lifetime?accountId=...&bust=1 — lifetime stats
+  // bust=1 bypasses in-memory cache and patches stats_cache.json on disk.
   if (req.method === 'GET' && pathname === '/api/players/lifetime') {
     const accountId = searchParams.get('accountId');
+    const bust      = searchParams.get('bust') === '1';
     if (!accountId) return errRes(res, 'accountId required');
+    if (!requireAdmin(req, res)) return;
     try {
-      const data = await getPlayerLifetime(accountId);
+      const data = await getPlayerLifetime(accountId, bust);
+      if (bust) {
+        // No seasonId needed for lifetime patch — pass undefined to leave season untouched
+        const sid = loadSavedSeasonId();
+        patchPlayerStatsDisk(accountId, sid, undefined, data);
+      }
       return jsonRes(res, data);
     } catch (e) {
       return errRes(res, e.message, 500);
@@ -150,18 +196,23 @@ async function handlePlayers(req, res, url) {
   }
 
   // GET /api/clan/stats — batch-fetch season + lifetime stats for all members
-  // Serves disk cache if fresh (< 2h), otherwise fetches live. Never blocks on rate limit.
+  //
+  // Loading strategy: ALWAYS serves the disk cache immediately if it has real
+  // data, regardless of age. The daily 6am scheduled task refreshes the cache —
+  // serving slightly old data is dramatically better than blocking the page
+  // load for 1-3 minutes on a synchronous live PUBG API fetch (13+ rate-limited
+  // calls). When the cache is stale (>2h) or missing, we kick off prewarm in
+  // the background; the next page load will pick up the fresh data, and the
+  // existing /api/prewarm/status poll on the frontend surfaces progress.
   if (req.method === 'GET' && pathname === '/api/clan/stats') {
     const members = loadMembers();
     if (!members.length) return jsonRes(res, { stats: [] });
 
-    // Helper: check if a season object has real data (not all-null from failed batch)
     function hasRealGameStats(seasonObj) {
       const gms = seasonObj?.data?.attributes?.gameModeStats;
       return (gms?.squad?.roundsPlayed > 0) || (gms?.['squad-fpp']?.roundsPlayed > 0);
     }
 
-    // Helper: load and validate disk cache, filtering to current members only
     const memberIds = new Set(members.map(m => m.accountId));
     function loadValidDiskCache() {
       try {
@@ -175,85 +226,56 @@ async function handlePlayers(req, res, url) {
       return null;
     }
 
-    // Serve disk cache immediately if fresh enough (< 2 hours old)
-    // This avoids hammering the API on every page load and keeps things snappy.
-    const CACHE_MAX_AGE = 2 * 60 * 60 * 1000; // 2 hours
+    function triggerBackgroundRefresh(reason) {
+      if (prewarm.running) return;
+      console.log(`[3PI] ⏳ ${reason} — kicking off background prewarm`);
+      // setImmediate so the response goes out before prewarm starts queuing API calls
+      setImmediate(() => {
+        prewarmStats().catch(e => console.warn('[3PI] Background prewarm failed:', e.message));
+      });
+    }
+
+    const CACHE_STALE_AFTER = 2 * 60 * 60 * 1000; // 2h — refresh in background after this
     const diskCache = loadValidDiskCache();
-    if (diskCache && (Date.now() - diskCache.savedAt) < CACHE_MAX_AGE) {
-      const ageMin = Math.round((Date.now() - diskCache.savedAt) / 60000);
-      console.log(`[APES] ⚡ Disk cache fresh (${ageMin}m old) — serving without API call (${diskCache.stats.length}/${members.length} members)`);
-      return jsonRes(res, { stats: diskCache.stats, seasonId: diskCache.seasonId, fromDiskCache: true });
-    }
 
-    // Cache is stale or missing — try live fetch
-    const seasonId = searchParams.get('seasonId');
-    let targetSeason = seasonId;
-    if (!targetSeason) {
-      try {
-        const current = await getCurrentSeason();
-        targetSeason = current ? current.id : null;
-        if (targetSeason) {
-          try { fs.writeFileSync(SEASON_FILE, JSON.stringify({ seasonId: targetSeason, savedAt: Date.now() })); } catch {}
-        }
-      } catch (e) {
-        targetSeason = loadSavedSeasonId();
-        if (!targetSeason) {
-          // Fall back to stale disk cache rather than failing completely
-          if (diskCache) {
-            console.log(`[APES] ⚡ Season API failed, serving stale disk cache`);
-            return jsonRes(res, { stats: diskCache.stats, seasonId: diskCache.seasonId, fromDiskCache: true });
-          }
-          return errRes(res, `Could not determine current season: ${e.message}`, 500);
-        }
+    // Cache exists with real data — always serve immediately, never block.
+    if (diskCache) {
+      const ageMs  = Date.now() - diskCache.savedAt;
+      const ageMin = Math.round(ageMs / 60000);
+      const stale  = ageMs > CACHE_STALE_AFTER;
+      if (stale) {
+        triggerBackgroundRefresh(`Disk cache ${ageMin}m old (>2h)`);
+      } else {
+        console.log(`[3PI] ⚡ Disk cache fresh (${ageMin}m old) — serving without API call (${diskCache.stats.length}/${members.length} members)`);
       }
-    }
-    if (!targetSeason) return errRes(res, 'No current season found', 500);
-
-    const accountIds = members.map(m => m.accountId);
-
-    let seasonMap   = new Map();
-    let lifetimeMap = new Map();
-    try { seasonMap   = await batchGetSeasonStats(accountIds, targetSeason); } catch (e) {
-      console.warn('[APES] batchGetSeasonStats failed:', e.message);
-    }
-    try { lifetimeMap = await batchGetLifetimeStats(accountIds); } catch (e) {
-      console.warn('[APES] batchGetLifetimeStats failed:', e.message);
+      return jsonRes(res, {
+        stats:         diskCache.stats,
+        seasonId:      diskCache.seasonId,
+        fromDiskCache: true,
+        ageMin,
+        stale,
+        refreshing:    prewarm.running,
+      });
     }
 
-    // If live fetch got no real data, fall back to disk cache (any age)
-    const gotAnyStats = [...seasonMap.values()].some(hasRealGameStats);
-    if (!gotAnyStats) {
-      if (diskCache) {
-        console.log(`[APES] ⚡ Live fetch returned no stats — serving disk cache`);
-        return jsonRes(res, { stats: diskCache.stats, seasonId: diskCache.seasonId, fromDiskCache: true });
-      }
-    }
-
-    const stats = members.map(m => ({
-      member:        m,
-      seasonId:      targetSeason,
-      season:        seasonMap.get(m.accountId)   || null,
-      lifetime:      lifetimeMap.get(m.accountId) || null,
-      seasonError:   seasonMap.get(m.accountId)   ? null : 'No season data',
-      lifetimeError: lifetimeMap.get(m.accountId) ? null : 'No lifetime data',
-    }));
-
-    // Persist to disk if we got real data
-    if (gotAnyStats) {
-      try {
-        fs.writeFileSync(STATS_FILE, JSON.stringify({ stats, seasonId: targetSeason, savedAt: Date.now() }, null, 2));
-        console.log(`[APES] 💾 Stats written to disk cache`);
-      } catch {}
-    }
-
-    return jsonRes(res, { stats, seasonId: targetSeason });
+    // No disk cache — first load after server start, or just busted by member add/remove.
+    // Don't block on a synchronous fetch (would take 1-3 minutes through the rate limiter).
+    // Trigger prewarm and return empty + refreshing flag; frontend already polls /api/prewarm/status.
+    triggerBackgroundRefresh('No disk cache present');
+    return jsonRes(res, {
+      stats:      [],
+      seasonId:   null,
+      refreshing: true,
+      message:    'Cache empty — refreshing in background, watch /api/prewarm/status',
+    });
   }
 
   // POST /api/clan/discover — seed with one player name, store clan metadata
-  // Body: { playerName: "SomeAPESMember" }
+  // Body: { playerName: "SomeClanMember" }
   // Note: PUBG API only exposes clan metadata (name, tag, level, count) — not
   // the full member roster. Use /api/members/bulk to import members by name.
   if (req.method === 'POST' && pathname === '/api/clan/discover') {
+    if (!requireAdmin(req, res)) return;
     const { parseBody } = require('../lib/http');
     const body = await parseBody(req);
     const playerName = (body.playerName || '').trim();
@@ -289,6 +311,7 @@ async function handlePlayers(req, res, url) {
   // POST /api/members/bulk — resolve multiple usernames at once
   // Body: { names: ["name1", "name2", ...] } or { names: "name1\nname2\nname3" }
   if (req.method === 'POST' && pathname === '/api/members/bulk') {
+    if (!requireAdmin(req, res)) return;
     const { parseBody } = require('../lib/http');
     const body = await parseBody(req);
     let names = body.names;

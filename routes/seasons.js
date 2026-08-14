@@ -6,13 +6,22 @@ const path = require('path');
 const { jsonRes, errRes } = require('../lib/http');
 const { getSeasons, getCurrentSeason } = require('../lib/pubg');
 const { DATA } = require('../lib/config');
+const { saveSeasonState, resolveSeasonBoundary } = require('../lib/season-state');
 
 const SEASON_FILE = path.join(DATA, 'season.json');
 
 function saveSeasonCache(seasons) {
   try {
     const current = seasons.find(s => s.attributes?.isCurrentSeason);
-    if (current) fs.writeFileSync(SEASON_FILE, JSON.stringify({ seasonId: current.id, savedAt: Date.now() }));
+    if (current) {
+      const boundary = resolveSeasonBoundary(current.id, null);
+      saveSeasonState({
+        seasonId: current.id,
+        savedAt: Date.now(),
+        seasonStartAt: boundary.seasonStartAt,
+        seasonStartSource: boundary.seasonStartSource,
+      });
+    }
   } catch {}
 }
 

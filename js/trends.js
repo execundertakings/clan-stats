@@ -24,22 +24,50 @@ function SectionRule({ label }) {
 }
 
 // ── Insight card helpers (module scope — stable refs) ─────────────────────────
-const insightAccentColor = t => t === 'counterintuitive' ? '#f87171' : t === 'warning' ? '#fb923c' : '#60a5fa';
+const insightAccentColor = t => t === 'counterintuitive' ? '#f87171'
+  : t === 'warning'    ? '#fb923c'
+  : t === 'spotlight'  ? '#facc15'
+  : '#60a5fa';
 
 const APE_CARD_IMGS = {
   efficiency_killer:  '/images/img7.png',
-  headshot_trap:      '/images/ape_sniper.png',
+  headshot_trap:      '/images/corp_sniper.png',
   dark_horse_winners: '/images/img5.png',
   closeout_crisis:    '/images/img3.png',
   vicsgmg_anomaly:    '/images/img4.png',
   boosts_vs_wins:     '/images/img6.png',
+  squad_carry:        '/images/corp_tactical.png',
 };
+
+// Pool of background images for AI-generated spotlight cards. Hash the spotlight
+// id deterministically so each spotlight keeps the same image across re-renders.
+const SPOTLIGHT_IMGS = [
+  '/images/corp_squad.png',
+  '/images/corp1.png',
+  '/images/corp2.png',
+  '/images/corp3.png',
+  '/images/corp_emblem.png',
+  '/images/corp_shotgun.png',
+  '/images/img1.png',
+  '/images/img2.png',
+  '/images/img4.png',
+  '/images/img6.png',
+];
+
+function spotlightImg(id) {
+  let h = 0;
+  for (let i = 0; i < (id || '').length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return SPOTLIGHT_IMGS[h % SPOTLIGHT_IMGS.length];
+}
 
 // data and viz are pre-computed by Trends and passed in so InsightCard has no closures
 function InsightCard({ ins, data, viz }) {
   const color = insightAccentColor(ins.type);
-  const img   = APE_CARD_IMGS[ins.id];
-  const typeLabel = ins.type === 'counterintuitive' ? 'Surprising' : ins.type === 'warning' ? 'Warning' : 'Insight';
+  const img   = APE_CARD_IMGS[ins.id] || (ins.type === 'spotlight' ? spotlightImg(ins.id) : null);
+  const typeLabel = ins.type === 'counterintuitive' ? 'Surprising'
+    : ins.type === 'warning'    ? 'Warning'
+    : ins.type === 'spotlight'  ? 'Spotlight'
+    : 'Insight';
   return (
     <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
 
@@ -82,7 +110,11 @@ function InsightCard({ ins, data, viz }) {
 
       {/* ── Finding + tip + players ───────────────────── */}
       <div style={{ padding: '16px 22px 20px', display: 'flex', flexDirection: 'column', gap: 12, flex: 1 }}>
-        <p style={{ margin: 0, fontSize: 13, color: 'var(--text-2)', lineHeight: 1.7, fontWeight: 400 }}>{ins.finding}</p>
+        <div style={{ margin: 0, fontSize: 13, color: 'var(--text-2)', lineHeight: 1.7, fontWeight: 400 }}>
+          {(ins.finding || '').split('\n\n').map((para, i) => (
+            <p key={i} style={{ margin: i === 0 ? 0 : '10px 0 0' }}>{para}</p>
+          ))}
+        </div>
         <div style={{ background: `${color}0d`, border: `1px solid ${color}22`, borderRadius: 8, padding: '10px 14px', fontSize: 12, color: 'var(--text-3)', lineHeight: 1.6 }}>
           {ins.tip}
         </div>
@@ -98,16 +130,197 @@ function InsightCard({ ins, data, viz }) {
   );
 }
 
+const TELEMETRY_CARD_ICONS = {
+  rotation_grade: '↺',
+  fight_timeline: '✦',
+  squad_spacing: '△',
+  zone_death_audit: '☄',
+  opening_damage_conversion: '↗',
+  drop_contest_intelligence: '⌖',
+  knock_conversion: '◎',
+  vehicle_rotation_report: '▣',
+  engagement_range_profile: '⌁',
+  clutch_recovery_index: '⟲',
+};
+
+function telemetryToneStyle(tone, accent) {
+  if (tone === 'good') return { color: '#4ade80', bg: 'rgba(74,222,128,.12)', border: 'rgba(74,222,128,.28)' };
+  if (tone === 'bad') return { color: '#f87171', bg: 'rgba(248,113,113,.12)', border: 'rgba(248,113,113,.28)' };
+  if (tone === 'warn') return { color: '#facc15', bg: 'rgba(250,204,21,.12)', border: 'rgba(250,204,21,.28)' };
+  return { color: accent, bg: `${accent}12`, border: `${accent}2a` };
+}
+
+function clampTelemetryPct(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(100, n));
+}
+
+function TelemetryPlaybookCard({ card }) {
+  const accent = card.accent || '#60a5fa';
+  const stats = Array.isArray(card.stats) ? card.stats : [];
+  const rows = Array.isArray(card.rows) ? card.rows : [];
+  const bars = Array.isArray(card.bars) ? card.bars : [];
+  const actions = Array.isArray(card.actions) ? card.actions : [];
+  const icon = TELEMETRY_CARD_ICONS[card.id] || '◈';
+  const statusStyle = telemetryToneStyle(card.status?.tone, accent);
+  const confidenceStyle = telemetryToneStyle(
+    (card.confidence?.score || 0) >= 80 ? 'good'
+      : (card.confidence?.score || 0) >= 55 ? 'warn'
+      : 'neutral',
+    '#94a3b8'
+  );
+  const heroScore = clampTelemetryPct(card.hero?.score);
+
+  return (
+    <div style={{ background: `linear-gradient(180deg, ${accent}08 0%, rgba(7,11,18,.02) 18%, var(--bg-card) 48%)`, border: '1px solid var(--border)', borderRadius: 14, overflow: 'hidden', display: 'flex', flexDirection: 'column', position: 'relative' }}>
+      <div style={{ height: 3, background: `linear-gradient(90deg, ${accent}, ${accent}33)` }} />
+      <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', background: `radial-gradient(circle at top right, ${accent}12, transparent 32%)` }} />
+      <div style={{ padding: '18px 20px 18px', display: 'flex', flexDirection: 'column', gap: 14, position: 'relative' }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ width: 38, height: 38, borderRadius: 12, display: 'grid', placeItems: 'center', fontSize: 20, fontWeight: 900, color: accent, background: `${accent}14`, border: `1px solid ${accent}2a`, boxShadow: `inset 0 0 0 1px ${accent}10` }}>{icon}</div>
+            <div>
+              <div style={{ fontSize: 9, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '.1em', color: accent, marginBottom: 5 }}>Telemetry Playbook</div>
+              <div style={{ fontWeight: 800, fontSize: 16, lineHeight: 1.2, color: 'var(--text-1)', letterSpacing: '-.01em' }}>{card.title}</div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            {card.status?.label && (
+              <span style={{ fontSize: 10, fontWeight: 800, padding: '5px 10px', borderRadius: 999, color: statusStyle.color, background: statusStyle.bg, border: `1px solid ${statusStyle.border}`, letterSpacing: '.01em' }}>
+                {card.status.label}
+              </span>
+            )}
+            {card.confidence?.label && (
+              <span style={{ fontSize: 10, fontWeight: 700, padding: '5px 10px', borderRadius: 999, color: confidenceStyle.color, background: confidenceStyle.bg, border: `1px solid ${confidenceStyle.border}` }}>
+                {card.confidence.label}
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 18 }}>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, flexWrap: 'wrap' }}>
+              <div style={{ fontSize: 34, fontWeight: 900, color: accent, lineHeight: 1, letterSpacing: '-.04em' }}>{card.hero?.value || '—'}</div>
+              <div style={{ paddingBottom: 3 }}>
+                <div style={{ fontSize: 11.5, fontWeight: 800, color: 'var(--text-2)', lineHeight: 1.2 }}>{card.hero?.unit || ''}</div>
+                {card.hero?.sub && <div style={{ fontSize: 10.5, color: 'var(--text-3)', marginTop: 3 }}>{card.hero.sub}</div>}
+              </div>
+            </div>
+            {card.finding && <div style={{ fontSize: 12.5, lineHeight: 1.65, color: 'var(--text-2)', marginTop: 12 }}>{card.finding}</div>}
+          </div>
+
+          <div style={{ width: 88, flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+            <div style={{
+              width: 88,
+              height: 88,
+              borderRadius: '50%',
+              display: 'grid',
+              placeItems: 'center',
+              background: `conic-gradient(${accent} 0deg ${heroScore * 3.6}deg, rgba(255,255,255,.08) ${heroScore * 3.6}deg 360deg)`,
+              boxShadow: `0 0 0 1px ${accent}22, inset 0 0 24px rgba(255,255,255,.03)`,
+            }}>
+              <div style={{ width: 68, height: 68, borderRadius: '50%', background: 'var(--bg-card)', border: '1px solid var(--border)', display: 'grid', placeItems: 'center', textAlign: 'center' }}>
+                <div>
+                  <div style={{ fontSize: 20, fontWeight: 900, color: accent, lineHeight: 1 }}>{Math.round(heroScore)}</div>
+                  <div style={{ fontSize: 8.5, fontWeight: 800, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '.08em', marginTop: 2 }}>
+                    {card.hero?.scoreLabel || 'signal'}
+                  </div>
+                </div>
+              </div>
+            </div>
+            {card.confidence?.basis && <div style={{ fontSize: 9.5, color: 'var(--text-3)', textAlign: 'center', lineHeight: 1.4 }}>{card.confidence.basis}</div>}
+          </div>
+        </div>
+
+        {card.meaning && (
+          <div style={{ background: `${accent}0d`, border: `1px solid ${accent}22`, borderRadius: 10, padding: '11px 12px' }}>
+            <div style={{ fontSize: 9, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '.1em', color: accent, marginBottom: 5 }}>What This Suggests</div>
+            <div style={{ fontSize: 12, color: 'var(--text-2)', lineHeight: 1.65 }}>{card.meaning}</div>
+          </div>
+        )}
+
+        {bars.length > 0 && (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 10 }}>
+            {bars.map((bar, idx) => (
+              <div key={`${card.id}-bar-${idx}`} style={{ padding: '10px 12px', borderRadius: 10, background: 'rgba(255,255,255,.02)', border: '1px solid var(--border)' }}>
+                <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, marginBottom: 7 }}>
+                  <div style={{ fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '.08em', color: 'var(--text-3)' }}>{bar.label}</div>
+                  <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--text-1)' }}>{bar.value}</div>
+                </div>
+                <div style={{ height: 8, borderRadius: 999, background: 'rgba(255,255,255,.06)', overflow: 'hidden' }}>
+                  <div style={{ width: `${clampTelemetryPct(bar.percent)}%`, height: '100%', borderRadius: 999, background: `linear-gradient(90deg, ${accent}, ${accent}88)` }} />
+                </div>
+                {bar.hint && <div style={{ fontSize: 10.5, color: 'var(--text-3)', lineHeight: 1.55, marginTop: 6 }}>{bar.hint}</div>}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {(rows.length > 0 || stats.length > 0) && (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 12 }}>
+            {rows.length > 0 && (
+              <div style={{ padding: '12px 12px 10px', borderRadius: 10, background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
+                <div style={{ fontSize: 9, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '.1em', color: 'var(--text-3)', marginBottom: 9 }}>Key Reads</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {rows.map((row, idx) => (
+                    <div key={`${card.id}-row-${idx}`} style={{ paddingBottom: idx < rows.length - 1 ? 8 : 0, borderBottom: idx < rows.length - 1 ? '1px solid var(--border)' : 'none' }}>
+                      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12 }}>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-1)' }}>{row.name}</div>
+                        <div style={{ fontSize: 11.5, fontWeight: 700, color: accent, textAlign: 'right' }}>{row.value}</div>
+                      </div>
+                      {row.sub && <div style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 3 }}>{row.sub}</div>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {stats.length > 0 && (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 8 }}>
+                {stats.map((stat, idx) => (
+                  <div key={`${card.id}-stat-${idx}`} style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, padding: '8px 10px', borderRadius: 8, background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.08em', color: 'var(--text-3)' }}>{stat.label}</div>
+                    <div style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text-1)', textAlign: 'right' }}>{stat.value}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {(actions.length > 0 || card.tip) && (
+          <div style={{ background: `${accent}10`, border: `1px solid ${accent}24`, borderRadius: 10, padding: '12px 12px 11px' }}>
+            <div style={{ fontSize: 9, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '.1em', color: accent, marginBottom: 8 }}>Coach Next</div>
+            {actions.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 7, marginBottom: card.tip ? 9 : 0 }}>
+                {actions.map((action, idx) => (
+                  <div key={`${card.id}-action-${idx}`} style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                    <div style={{ width: 6, height: 6, borderRadius: '50%', background: accent, marginTop: 6, flexShrink: 0 }} />
+                    <div style={{ fontSize: 11.5, color: 'var(--text-2)', lineHeight: 1.55 }}>{action}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {card.tip && <div style={{ fontSize: 11.5, color: 'var(--text-2)', lineHeight: 1.6, opacity: 0.95 }}>{card.tip}</div>}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Trends ────────────────────────────────────────────────────────────────────
 
-function Trends({ resolvedStats, loading, weaponData, squadData, heatmapData, analysisData }) {
+function Trends({ resolvedStats, loading, weaponData, squadData, heatmapData, analysisData, aiInsights, telemetryInsights }) {
   // analysisData is computed in App from resolvedStats — same source of truth as all other tabs
   const insights = analysisData;
   const isMobile = useIsMobile();
 
   const players = useMemo(() => {
     if (!resolvedStats?.length) return [];
-    return resolvedStats.map(({ member, s, games, kdVal, winRate, top10Rate, closeOutRate, hsRate, dmgPerKill, boostsPg, wins, top10 }) => {
+    return resolvedStats.map(({ member, s, games, kdVal, winRate, top10Rate, closeOutRate, hsRate, dmgPerKill, boostsPg, assistsPg, wins, top10 }) => {
       if (!s || games < 5) return null;
       return {
         name: member.name,
@@ -118,10 +331,23 @@ function Trends({ resolvedStats, loading, weaponData, squadData, heatmapData, an
         hsRate,                     // pre-computed from trunk
         dmgPerKill,                 // pre-computed from trunk
         boostsPerGame: boostsPg,    // pre-computed from trunk
+        assistsPg,                  // pre-computed from trunk
         matches: games, wins, top10s: top10,
       };
     }).filter(Boolean);
   }, [resolvedStats]);
+
+  const captureCoverage = useMemo(() => {
+    const active = (resolvedStats || []).filter(r => r.games > 0);
+    const covered = active.filter(r => historyCoverageSummary(r.coverage)?.trusted !== false);
+    return {
+      activePlayers: active.length,
+      coveredPlayers: covered.length,
+      telemetryReady: active.length > 0 && covered.length === active.length,
+    };
+  }, [resolvedStats]);
+
+  const mapServiceInfo = useMemo(() => getCurrentMapServiceInfo(), []);
 
   // Clan-wide map performance aggregated from match history (via resolvedStats.recent)
   const clanMapStats = useMemo(() => {
@@ -152,7 +378,7 @@ function Trends({ resolvedStats, loading, weaponData, squadData, heatmapData, an
 
   // Knockdown conversion: per player, total knocks vs kills from weapon cache
   const knockdownStats = useMemo(() => {
-    if (!weaponData) return null;
+    if (!weaponData || !captureCoverage.telemetryReady) return null;
     return Object.values(weaponData)
       .map(p => {
         const totalKills  = p.weapons.reduce((s, w) => s + w.kills, 0);
@@ -167,19 +393,31 @@ function Trends({ resolvedStats, loading, weaponData, squadData, heatmapData, an
       })
       .filter(Boolean)
       .sort((a, b) => a.finishRate - b.finishRate); // ascending: worst finishers first
-  }, [weaponData]);
+  }, [weaponData, captureCoverage]);
 
   // Blue zone damage ranking from weapon cache
   const blueZoneRanking = useMemo(() => {
-    if (!weaponData) return null;
+    if (!weaponData || !captureCoverage.telemetryReady) return null;
     return Object.values(weaponData)
       .filter(p => p.blueZone?.matches >= 5)
       .map(p => ({ name: p.name, ...p.blueZone }))
       .sort((a, b) => b.avgDmgPerGame - a.avgDmgPerGame);
-  }, [weaponData]);
+  }, [weaponData, captureCoverage]);
 
-  // Compute hero stat + bar rows for each insight id
-  function cardData(id) {
+  // Compute hero stat + bar rows for an insight. Accepts the whole insight
+  // object so spotlight cards (LLM-generated) can pull their hero/bars from the
+  // payload itself rather than re-deriving from resolvedStats.
+  function cardData(ins) {
+    // AI-generated spotlight cards bring their own hero/bars from the server.
+    if (ins.type === 'spotlight' || (ins.id || '').startsWith('spotlight_')) {
+      return {
+        hero:     ins.hero?.value ?? '—',
+        heroUnit: ins.hero?.unit  ?? '',
+        heroSub:  ins.hero?.sub   ?? '',
+        bars:     Array.isArray(ins.bars) ? ins.bars : [],
+      };
+    }
+    const id = ins.id;
     switch (id) {
       case 'efficiency_killer': {
         const rows = players.filter(p => p.dmgPerKill && p.matches >= 8).sort((a, b) => a.dmgPerKill - b.dmgPerKill);
@@ -246,6 +484,18 @@ function Trends({ resolvedStats, loading, weaponData, squadData, heatmapData, an
           heroUnit: 'boosts / game',
           heroSub: top?.name + ' · ' + (top?.winRate * 100).toFixed(1) + '% wins',
           rows: rows.slice(0, 8).map(p => ({ name: p.name, val: p.boostsPerGame, max: top?.boostsPerGame || 1, label: p.boostsPerGame.toFixed(1), winRate: p.winRate })),
+          rowUnit: 'Win%',
+        };
+      }
+      case 'squad_carry': {
+        const rows = players.filter(p => p.matches >= 8 && (p.assistsPg || 0) > 0).sort((a, b) => (b.assistsPg || 0) - (a.assistsPg || 0));
+        const top = rows[0];
+        if (!top) return { hero: '—', heroUnit: 'assists / game', heroSub: '', rows: [] };
+        return {
+          hero: (top.assistsPg || 0).toFixed(1),
+          heroUnit: 'assists / game',
+          heroSub: top.name + ' · ' + (top.winRate * 100).toFixed(1) + '% wins',
+          rows: rows.slice(0, 8).map(p => ({ name: p.name, val: p.assistsPg || 0, max: top.assistsPg || 1, label: (p.assistsPg || 0).toFixed(1), winRate: p.winRate })),
           rowUnit: 'Win%',
         };
       }
@@ -409,14 +659,43 @@ function Trends({ resolvedStats, loading, weaponData, squadData, heatmapData, an
     );
   }
 
-  function buildViz(id, data) {
-    switch (id) {
+  // Spotlight bars: LLM-provided rows already have name/label/val/max/tone.
+  // No win-rate coloring — we trust the LLM's "tone" for color.
+  function SpotlightBarViz({ bars }) {
+    if (!bars?.length) return null;
+    const toneColor = t => t === 'good' ? '#4ade80' : t === 'warn' ? '#facc15' : t === 'bad' ? '#f87171' : '#94a3b8';
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+        {bars.map((b, i) => {
+          const max = Math.max(b.max || 0, 0.0001);
+          const w   = Math.min((b.val / max) * 100, 100);
+          const c   = toneColor(b.tone);
+          return (
+            <div key={`${b.name}_${i}`} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ width: 110, fontSize: 11.5, fontWeight: 500, color: 'var(--text-2)', textAlign: 'right', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flexShrink: 0 }}>{b.name}</div>
+              <div style={{ flex: 1, height: 18, background: 'var(--bg-surface)', borderRadius: 5, overflow: 'hidden' }}>
+                <div style={{ height: '100%', width: w + '%', background: c, opacity: 0.78, borderRadius: 5, transition: 'width .4s' }} />
+              </div>
+              <div style={{ width: 44, fontSize: 12.5, color: 'var(--text-1)', fontWeight: 700, textAlign: 'right', flexShrink: 0 }}>{b.label ?? b.val}</div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  function buildViz(ins, data) {
+    if (ins.type === 'spotlight' || (ins.id || '').startsWith('spotlight_')) {
+      return data.bars?.length ? <SpotlightBarViz bars={data.bars} /> : null;
+    }
+    switch (ins.id) {
       case 'efficiency_killer':  return <SimpleBarViz rows={data.rows} />;
       case 'headshot_trap':      return <SimpleBarViz rows={data.rows} />;
       case 'dark_horse_winners': return <RankViz kdRows={data.kdRows} byWin={data.byWin} />;
       case 'closeout_crisis':    return <CloseoutViz rows={data.rows} />;
       case 'vicsgmg_anomaly':    return <PeerViz peerRows={data.peerRows} />;
       case 'boosts_vs_wins':     return <SimpleBarViz rows={data.rows} />;
+      case 'squad_carry':        return <SimpleBarViz rows={data.rows} />;
       default: return null;
     }
   }
@@ -428,11 +707,29 @@ function Trends({ resolvedStats, loading, weaponData, squadData, heatmapData, an
     </div>
   );
 
-  const col1ids = ['efficiency_killer', 'dark_horse_winners', 'boosts_vs_wins'];
-  const col2ids = ['headshot_trap', 'closeout_crisis', 'vicsgmg_anomaly'];
+  // Anchor insights — deterministic, always-on cards from computeAnalysisFromStats.
+  // The headshot_trap and vicsgmg_anomaly cards were retired in favour of
+  // LLM-generated spotlights, which surface fresh angles each daily run.
+  const ANCHOR_IDS = ['efficiency_killer', 'dark_horse_winners', 'closeout_crisis', 'squad_carry'];
+  const anchors = (insights?.insights || [])
+    .filter(i => ANCHOR_IDS.includes(i.id))
+    .sort((a, b) => ANCHOR_IDS.indexOf(a.id) - ANCHOR_IDS.indexOf(b.id));
+  const spotlights = aiInsights?.spotlights || [];
 
-  const col1 = insights?.insights?.filter(i => col1ids.includes(i.id)).sort((a,b) => col1ids.indexOf(a.id)-col1ids.indexOf(b.id)) || [];
-  const col2 = insights?.insights?.filter(i => col2ids.includes(i.id)).sort((a,b) => col2ids.indexOf(a.id)-col2ids.indexOf(b.id)) || [];
+  // Interleave anchors with spotlights so AI-generated cards are visually
+  // mixed in rather than ghettoized at the end.
+  const allCards = [];
+  for (let i = 0; i < Math.max(anchors.length, spotlights.length); i++) {
+    if (anchors[i])    allCards.push(anchors[i]);
+    if (spotlights[i]) allCards.push(spotlights[i]);
+  }
+  // When allCards has an odd count the last card would otherwise be a lone
+  // card at the bottom of col1. Instead, move it to col2 so it appears to
+  // the right of col1's last card rather than dangling below it.
+  const n = allCards.length;
+  const lastGoesRight = n % 2 === 1;
+  const col1 = allCards.filter((_, i) => i % 2 === 0 && !(lastGoesRight && i === n - 1));
+  const col2 = allCards.filter((_, i) => i % 2 === 1 || (lastGoesRight && i === n - 1));
 
   return (
     <div className="p-6" style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
@@ -444,12 +741,22 @@ function Trends({ resolvedStats, loading, weaponData, squadData, heatmapData, an
           <h2 style={{ fontSize: 24, fontWeight: 900, letterSpacing: '-.03em', margin: 0, lineHeight: 1 }}>Trends &amp; Insights</h2>
           <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 6 }}>{players.length} active members · AI-powered analysis</div>
         </div>
-        {insights?.computedAt && (() => {
-          const m = Math.round((Date.now() - new Date(insights.computedAt)) / 60000);
+        {(() => {
+          // Prefer the AI insights cache timestamp (set once per daily run, truthful)
+          // over insights.computedAt (which resets on every page render).
+          const ts = aiInsights?.computedAt || insights?.computedAt;
+          if (!ts) return null;
+          const ms = Date.now() - new Date(ts).getTime();
+          const m  = Math.max(0, Math.round(ms / 60000));
+          const label = m < 60 ? `${m}m ago`
+            : m < 60 * 24 ? `${Math.round(m / 60)}h ago`
+            : `${Math.round(m / 60 / 24)}d ago`;
           return (
             <div style={{ textAlign: 'right', flexShrink: 0 }}>
-              <div style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.08em', color: 'var(--text-3)', marginBottom: 3 }}>Last updated</div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-2)' }}>{m < 60 ? `${m}m ago` : `${Math.round(m/60)}h ago`}</div>
+              <div style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.08em', color: 'var(--text-3)', marginBottom: 3 }}>
+                {aiInsights?.computedAt ? 'Spotlights generated' : 'Last updated'}
+              </div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-2)' }}>{label}</div>
             </div>
           );
         })()}
@@ -461,10 +768,10 @@ function Trends({ resolvedStats, loading, weaponData, squadData, heatmapData, an
       {insights ? (
         <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start', flexDirection: isMobile ? 'column' : 'row' }}>
           <div style={{ flex: isMobile ? 'none' : '11', width: isMobile ? '100%' : undefined, display: 'flex', flexDirection: 'column', gap: 14 }}>
-            {col1.map(ins => { const d = cardData(ins.id); return <InsightCard key={ins.id} ins={ins} data={d} viz={buildViz(ins.id, d)} />; })}
+            {col1.map(ins => { const d = cardData(ins); return <InsightCard key={ins.id} ins={ins} data={d} viz={buildViz(ins, d)} />; })}
           </div>
           <div style={{ flex: isMobile ? 'none' : '9', width: isMobile ? '100%' : undefined, display: 'flex', flexDirection: 'column', gap: 14 }}>
-            {col2.map(ins => { const d = cardData(ins.id); return <InsightCard key={ins.id} ins={ins} data={d} viz={buildViz(ins.id, d)} />; })}
+            {col2.map(ins => { const d = cardData(ins); return <InsightCard key={ins.id} ins={ins} data={d} viz={buildViz(ins, d)} />; })}
           </div>
         </div>
       ) : (
@@ -478,9 +785,34 @@ function Trends({ resolvedStats, loading, weaponData, squadData, heatmapData, an
         </div>
       )}
 
+      {/* ── Section: Telemetry Playbook ─────────────────────────────────────── */}
+      <SectionRule label="Telemetry Playbook" />
+
+      {telemetryInsights?.cards?.length ? (
+        <>
+          <div style={{ marginTop: -4, padding: '12px 14px', borderRadius: 10, background: 'rgba(96,165,250,.08)', border: '1px solid rgba(96,165,250,.20)', color: 'var(--text-2)', fontSize: 12, lineHeight: 1.6 }}>
+            Built from cached telemetry only: {telemetryInsights.coverage?.telemetryMatches || 0} of {telemetryInsights.coverage?.officialMatches || 0} official matches
+            {' '}({((telemetryInsights.coverage?.telemetryRate || 0) * 100).toFixed(1)}% coverage). These are coaching signals from the tracked sample, not universal season truth.
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 14 }}>
+            {telemetryInsights.cards.map(card => <TelemetryPlaybookCard key={card.id} card={card} />)}
+          </div>
+        </>
+      ) : (
+        <div style={{ padding: '14px 16px', borderRadius: 10, background: 'var(--bg-card)', border: '1px solid var(--border)', fontSize: 12, color: 'var(--text-3)' }}>
+          Telemetry playbook cache not built yet. Run the daily pipeline or `node scripts/build_telemetry_insights.js`.
+        </div>
+      )}
+
       {/* ── Section: Player Analytics ────────────────────────────────────────── */}
       {(formRanking?.length > 0 || clanMapStats?.length > 0 || blueZoneRanking?.length > 0) && (
         <SectionRule label="Player Analytics" />
+      )}
+
+      {!captureCoverage.telemetryReady && captureCoverage.activePlayers > 0 && (
+        <div style={{ marginBottom: 14, padding: '10px 12px', borderRadius: 10, background: 'rgba(250,204,21,.08)', border: '1px solid rgba(250,204,21,.25)', color: '#facc15', fontSize: 12 }}>
+          Telemetry-derived clan analytics are hidden for now because match capture is partial this season ({captureCoverage.coveredPlayers}/{captureCoverage.activePlayers} players fully covered).
+        </div>
       )}
 
       {/* ── Recent Form — full width ─────────────────────────────────────────── */}
@@ -537,6 +869,34 @@ function Trends({ resolvedStats, loading, weaponData, squadData, heatmapData, an
         );
       })()}
 
+      {mapServiceInfo && (
+        <SectionCard
+          label="Map Service"
+          title="NA Map Select Is Live"
+          subtitle={`Map selection returned to ${mapServiceInfo.region} on May 13, 2026. ${mapServiceInfo.weekLabel} runs ${new Date(mapServiceInfo.windowStart).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}–${new Date(mapServiceInfo.windowEnd).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}. Read the map trends below as post-map-select performance, not pure random rotation.`}
+          accentColor="#38bdf8"
+        >
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {mapServiceInfo.maps.map(map => (
+              <span
+                key={map}
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  padding: '5px 10px',
+                  borderRadius: 999,
+                  color: '#7dd3fc',
+                  background: 'rgba(56,189,248,.10)',
+                  border: '1px solid rgba(56,189,248,.26)',
+                }}
+              >
+                {map}
+              </span>
+            ))}
+          </div>
+        </SectionCard>
+      )}
+
       {/* ── Row: Map Performance + Squad Chemistry ────────────────────────────── */}
       {(clanMapStats?.length > 0 || (squadData?.topPairs?.length > 0 || squadData?.topTrios?.length > 0)) && (
         <div style={{ display: isMobile ? 'flex' : 'grid', gridTemplateColumns: '58fr 42fr', flexDirection: 'column', gap: 14 }}>
@@ -550,7 +910,7 @@ function Trends({ resolvedStats, loading, weaponData, squadData, heatmapData, an
               <SectionCard
                 label="Map Performance"
                 title="Win Rate by Map"
-                subtitle={<>Best: <strong style={{ color: 'var(--text-1)' }}>{best.map}</strong> at {(best.winRate*100).toFixed(1)}%{worst.map !== best.map ? <> · Weakest: <strong style={{ color: 'var(--text-1)' }}>{worst.map}</strong> at {(worst.winRate*100).toFixed(1)}%</> : ''}. Last 10 games per player, clan-wide.</>}
+                subtitle={<>Best: <strong style={{ color: 'var(--text-1)' }}>{best.map}</strong> at {(best.winRate*100).toFixed(1)}%{worst.map !== best.map ? <> · Weakest: <strong style={{ color: 'var(--text-1)' }}>{worst.map}</strong> at {(worst.winRate*100).toFixed(1)}%</> : ''}. Last 10 games per player, clan-wide{mapServiceInfo ? ' — interpreted inside the new map-select pool.' : '.'}</>}
                 accentColor="#22d3ee"
               >
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>

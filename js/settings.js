@@ -9,7 +9,7 @@ function Settings({ members, onMembersChange }) {
 
   useEffect(() => {
     let cancelled = false;
-    const fetch = () => api.get('/api/notifier/status').then(d => { if (!cancelled) setNotifier(d); }).catch(() => {});
+    const fetch = () => api.get('/api/notifier/status', { admin: true }).then(d => { if (!cancelled) setNotifier(d); }).catch(() => {});
     fetch();
     const t = setInterval(fetch, 8000);
     return () => { cancelled = true; clearInterval(t); };
@@ -20,8 +20,8 @@ function Settings({ members, onMembersChange }) {
     try {
       await api.post('/api/notifier/scan', {});
       setScanMsg('Scan triggered — log updates below');
-      setTimeout(() => api.get('/api/notifier/status').then(setNotifier).catch(() => {}), 4000);
-      setTimeout(() => api.get('/api/notifier/status').then(setNotifier).catch(() => {}), 12000);
+      setTimeout(() => api.get('/api/notifier/status', { admin: true }).then(setNotifier).catch(() => {}), 4000);
+      setTimeout(() => api.get('/api/notifier/status', { admin: true }).then(setNotifier).catch(() => {}), 12000);
     } catch (e) { setScanMsg(`Error: ${e.message}`); }
     finally     { setScanning(false); }
   }

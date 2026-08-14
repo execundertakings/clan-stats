@@ -1,11 +1,14 @@
 'use strict';
-// ── APES Clan Stats — Service Worker ─────────────────────────────────────────
+// ── Third Party Incorporated — Service Worker ─────────────────────────────────
 // Strategy:
+//   • /dist/* (bundle.js, styles.css) → Network-first (changes with every build)
 //   • App shell (index.html, icons, manifest) → Cache-first, update in background
-//   • CDN assets (React, Babel, Tailwind, fonts) → Cache-first (long-lived)
+//   • CDN assets (React, fonts) → Cache-first (long-lived, content-addressed)
 //   • /api/* → Network-only (always fresh data)
+//
+// IMPORTANT: bump CACHE version whenever a stale-cache bug needs clearing.
 
-const CACHE = 'apes-v1';
+const CACHE = '3pi-v1';
 
 const PRECACHE = [
   '/',
@@ -70,7 +73,22 @@ self.addEventListener('fetch', e => {
     return;
   }
 
-  // App shell — cache-first, revalidate in background (stale-while-revalidate)
+  // Built assets (/dist/bundle.js, /dist/styles.css) — network-first so a
+  // rebuild is visible immediately. Falls back to cache only if offline.
+  if (parsed.pathname.startsWith('/dist/')) {
+    e.respondWith(
+      fetch(e.request).then(res => {
+        if (res.ok) {
+          const clone = res.clone();
+          caches.open(CACHE).then(c => c.put(e.request, clone));
+        }
+        return res;
+      }).catch(() => caches.match(e.request))
+    );
+    return;
+  }
+
+  // App shell (index.html, icons, manifest) — cache-first, revalidate in background
   if (parsed.origin === self.location.origin) {
     e.respondWith(
       caches.open(CACHE).then(async cache => {

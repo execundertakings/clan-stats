@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict';
-// ── scripts/register-commands.js — Register APES Discord slash commands ───────
+// ── scripts/register-commands.js — Register clan Discord slash commands ───────
 // Run this once (or whenever you add/change commands):
 //   node scripts/register-commands.js
 //
@@ -8,17 +8,19 @@
 //   DISCORD_APP_ID     — from Discord Developer Portal → General Information
 //   DISCORD_BOT_TOKEN  — from Discord Developer Portal → Bot → Token
 //
-// Registers GLOBALLY (takes ~1 hour to propagate) or to a single guild (instant).
-// To register to a specific guild only, set DISCORD_GUILD_ID in .env.
+// Registers to the configured guild (instant). To intentionally register global
+// commands (~1 hour propagation), leave discord.guildId empty and pass --global.
 
-const https  = require('https');
-const path   = require('path');
-const { loadEnv } = require('../lib/config');
+const { loadEnv, loadClanConfig } = require('../lib/config');
+const { discordApiRequest } = require('../lib/discord');
 
 const env = loadEnv();
 const APP_ID    = env.DISCORD_APP_ID;
 const BOT_TOKEN = env.DISCORD_BOT_TOKEN;
-const GUILD_ID  = env.DISCORD_GUILD_ID; // optional: set for instant guild-scoped registration
+// Guild ID comes from config/clan.config.json (single source). Guild-scoped
+// registration is instant; leave guildId empty in config for global (~1h) registration.
+const GUILD_ID  = loadClanConfig().discord.guildId;
+const _RC = loadClanConfig().clan; // clan branding for command descriptions
 
 if (!APP_ID || !BOT_TOKEN) {
   console.error('❌  DISCORD_APP_ID and DISCORD_BOT_TOKEN must be set in .env');
@@ -41,15 +43,15 @@ const COMMANDS = [
   },
   {
     name:        'roster',
-    description: 'List all current APES clan members',
+    description: `List all current ${_RC.name} ${_RC.memberNounPlural}`,
   },
   {
     name:        'leaderboard',
-    description: 'Show the APES season leaderboard (K/D, kills, wins)',
+    description: `Show the ${_RC.shortName} season leaderboard (K/D, kills, wins)`,
   },
   {
     name:        'help',
-    description: 'Show all available APES bot commands',
+    description: `Show all available ${_RC.shortName} bot commands`,
   },
   {
     name:        'anal',
@@ -64,61 +66,91 @@ const COMMANDS = [
       },
     ],
   },
+  {
+    name:        'register',
+    description: `Register your PUBG account to get your stats tracked on the ${_RC.shortName} leaderboard`,
+    options: [
+      {
+        type:         3,    // STRING
+        name:         'pubg_name',
+        description:  'Your exact PUBG username (case-sensitive)',
+        required:     true,
+      },
+    ],
+  },
+  {
+    name:        'glaze',
+    description: "Show today's glaze — an over-the-top celebration of one clan member's best stats",
+  },
+  {
+    name:        'roast',
+    description: "Show today's roast — a ruthless, data-backed dragging of a clan member's worst stats",
+  },
+  {
+    name:        'bugreport',
+    description: 'Report something you noticed wrong on the stats page or in the Discord bot',
+    options: [
+      {
+        type:        3,    // STRING
+        name:        'text',
+        description: 'What went wrong / what you noticed (10–2000 characters)',
+        required:    true,
+        min_length:  10,
+        max_length:  2000,
+      },
+    ],
+  },
+  {
+    name:        'bugreports',
+    description: 'List the bug reports you have submitted and their current status',
+  },
 ];
 
-function registerCommands(commands) {
-  const body    = JSON.stringify(commands);
+const ALLOW_GLOBAL = process.argv.includes('--global');
+
+function registerCommands(commands, { allowGlobal = ALLOW_GLOBAL } = {}) {
+  if (!GUILD_ID && !allowGlobal) {
+    throw new Error('discord.guildId is empty. Refusing global registration unless --global is passed explicitly.');
+  }
+
   // Guild-specific (instant) or global (1h propagation)
-  const apiPath = GUILD_ID
-    ? `/api/v10/applications/${APP_ID}/guilds/${GUILD_ID}/commands`
-    : `/api/v10/applications/${APP_ID}/commands`;
+  const endpoint = GUILD_ID
+    ? `/applications/${APP_ID}/guilds/${GUILD_ID}/commands`
+    : `/applications/${APP_ID}/commands`;
 
   console.log(GUILD_ID
     ? `🚀 Registering to guild ${GUILD_ID} (instant)…`
     : '🌐 Registering globally (may take ~1h to propagate)…'
   );
 
-  return new Promise((resolve, reject) => {
-    const req = https.request({
-      hostname: 'discord.com',
-      path:     apiPath,
-      method:   'PUT',   // PUT replaces all commands atomically
-      headers: {
-        'Content-Type':   'application/json',
-        'Content-Length': Buffer.byteLength(body),
-        'Authorization':  `Bot ${BOT_TOKEN}`,
-        'User-Agent':     'APES-ClanBot/1.0',
-      },
-    }, res => {
-      let d = '';
-      res.on('data', c => d += c);
-      res.on('end', () => {
-        if (res.statusCode >= 200 && res.statusCode < 300) {
-          const registered = JSON.parse(d);
-          console.log(`✅  Registered ${registered.length} command(s):`);
-          registered.forEach(c => console.log(`   /${c.name} — ${c.description}`));
-          resolve(registered);
-        } else {
-          reject(new Error(`Discord API ${res.statusCode}: ${d.slice(0, 500)}`));
-        }
-      });
-    });
-
-    req.on('error', reject);
-    req.setTimeout(15_000, () => { req.destroy(); reject(new Error('Timeout')); });
-    req.write(body);
-    req.end();
+  return discordApiRequest({
+    token: BOT_TOKEN,
+    endpoint,
+    method: 'PUT',
+    body: commands,
+  }).then(result => {
+    const registered = result.json || [];
+    console.log(`✅  Registered ${registered.length} command(s):`);
+    registered.forEach(c => console.log(`   /${c.name} — ${c.description}`));
+    return registered;
   });
 }
 
-registerCommands(COMMANDS)
-  .then(() => {
-    console.log('\nDone! Next step: make sure your Interactions Endpoint URL is set in the Discord');
-    console.log('Developer Portal → your app → General Information → Interactions Endpoint URL');
-    const tunnel = env.CLOUDFLARE_TUNNEL_URL || '<your-cloudflare-tunnel-url>';
-    console.log(`\nSet it to: ${tunnel}/interactions`);
-  })
-  .catch(e => {
-    console.error('❌  Registration failed:', e.message);
-    process.exit(1);
-  });
+if (require.main === module) {
+  registerCommands(COMMANDS)
+    .then(() => {
+      console.log('\nDone! Next step: make sure your Interactions Endpoint URL is set in the Discord');
+      console.log('Developer Portal → your app → General Information → Interactions Endpoint URL');
+      const tunnel = loadClanConfig().site.publicUrl || env.CLOUDFLARE_TUNNEL_URL || '<your-cloudflare-tunnel-url>';
+      console.log(`\nSet it to: ${tunnel}/interactions`);
+    })
+    .catch(e => {
+      console.error('❌  Registration failed:', e.message);
+      process.exit(1);
+    });
+}
+
+module.exports = {
+  COMMANDS,
+  registerCommands,
+};

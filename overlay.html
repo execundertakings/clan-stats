@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>[APES] Clan Overlay</title>
+  <title>Clan Overlay</title>
   <style>
     /* ── OBS Browser Source: recommended 1920×1080, transparent background ── */
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -275,13 +275,24 @@
 // ── URL params ────────────────────────────────────────────────────────────────
 const params   = new URLSearchParams(window.location.search);
 const PLAYER   = params.get('player') || null;     // e.g. ?player=Shadowbla
-const POSITION = params.get('pos') || 'tr';        // tl|tr|bl|br|c
-const REFRESH  = parseInt(params.get('refresh') || '60', 10) * 1000; // seconds
+const POSITIONS = new Set(['tl', 'tr', 'bl', 'br', 'c']);
+const POSITION = POSITIONS.has(params.get('pos')) ? params.get('pos') : 'tr';
+const refreshSeconds = parseInt(params.get('refresh') || '60', 10);
+const REFRESH  = Math.min(Math.max(Number.isFinite(refreshSeconds) ? refreshSeconds : 60, 10), 3600) * 1000;
+let CLAN = { shortName: 'Clan', emoji: '🎮' };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function kd(kills, deaths)  { return deaths > 0 ? (kills / deaths).toFixed(2) : kills.toFixed(2); }
 function pct(n, d)          { return d > 0 ? Math.round(n / d * 100) + '%' : '—'; }
 function fmt(n)             { return Number(n || 0).toLocaleString('en-US'); }
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, ch => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]
+  ));
+}
+function brandLogo() {
+  return `${escapeHtml(CLAN.emoji || '')} ${escapeHtml(CLAN.shortName || 'Clan')}`.trim();
+}
 
 function extractStats(sd) {
   const gms = sd?.data?.attributes?.gameModeStats;
@@ -300,7 +311,7 @@ function tierInfo(kdVal) {
 }
 
 function initials(name) {
-  return name.slice(0, 2).toUpperCase();
+  return escapeHtml(name.slice(0, 2).toUpperCase());
 }
 
 function rankLabel(i) {
@@ -321,6 +332,16 @@ async function fetchStats() {
   return { stats: d.stats || [], seasonId: d.seasonId || null };
 }
 
+async function fetchConfig() {
+  try {
+    const res = await fetch('/api/config');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
 function renderLeaderboard(stats, seasonId) {
   // Build rows
   const rows = stats.map(entry => {
@@ -338,7 +359,7 @@ function renderLeaderboard(stats, seasonId) {
 
   if (!rows.length) return '<div class="loading">No stats yet</div>';
 
-  const shortSeason = seasonId ? seasonId.split('.').pop() : '?';
+  const shortSeason = seasonId ? escapeHtml(seasonId.split('.').pop()) : '?';
 
   const colHeaders = `
     <div class="lb-col-header">
@@ -354,7 +375,7 @@ function renderLeaderboard(stats, seasonId) {
     return `
       <div class="lb-row">
         <span class="lb-rank ${rank.cls}">${rank.text}</span>
-        <span class="lb-name">${r.name}</span>
+        <span class="lb-name">${escapeHtml(r.name)}</span>
         <span class="lb-val kd">${r.kdVal.toFixed(2)}</span>
         <span class="lb-val kills">${fmt(r.kills)}</span>
         <span class="lb-val wins">${r.wins}</span>
@@ -363,7 +384,7 @@ function renderLeaderboard(stats, seasonId) {
 
   return `
     <div class="overlay-header">
-      <span class="overlay-logo">🦍 APES</span>
+      <span class="overlay-logo">${brandLogo()}</span>
       <span class="overlay-season">Season ${shortSeason}</span>
       <span style="display:flex;align-items:center;gap:5px"><div class="live-dot"></div><span class="overlay-refresh">LIVE</span></span>
     </div>
@@ -374,21 +395,21 @@ function renderLeaderboard(stats, seasonId) {
 function renderPlayer(stats, target, seasonId) {
   const entry = stats.find(e => e.member.name.toLowerCase() === target.toLowerCase())
              || stats.find(e => e.member.name.toLowerCase().includes(target.toLowerCase()));
-  if (!entry) return `<div class="error-msg">Player "${target}" not found</div>`;
+  if (!entry) return `<div class="error-msg">Player "${escapeHtml(target)}" not found</div>`;
 
   const s     = extractStats(entry.season);
-  if (!s) return `<div class="error-msg">No stats for ${entry.member.name}</div>`;
+  if (!s) return `<div class="error-msg">No stats for ${escapeHtml(entry.member.name)}</div>`;
 
   const kdVal  = s.losses ? s.kills / s.losses : s.kills;
   const tier   = tierInfo(kdVal);
   const avgDmg = s.roundsPlayed ? Math.round(s.damageDealt / s.roundsPlayed) : 0;
   const hsRate = s.kills ? Math.round(s.headshotKills / s.kills * 100) : 0;
   const winRate = s.roundsPlayed ? Math.round(s.wins / s.roundsPlayed * 100) : 0;
-  const shortSeason = seasonId ? seasonId.split('.').pop() : '?';
+  const shortSeason = seasonId ? escapeHtml(seasonId.split('.').pop()) : '?';
 
   return `
     <div class="overlay-header">
-      <span class="overlay-logo">🦍 APES</span>
+      <span class="overlay-logo">${brandLogo()}</span>
       <span class="overlay-season">Season ${shortSeason}</span>
       <span style="display:flex;align-items:center;gap:5px"><div class="live-dot"></div><span class="overlay-refresh">LIVE</span></span>
     </div>
@@ -398,7 +419,7 @@ function renderPlayer(stats, target, seasonId) {
           <span class="${tier.cls}">${initials(entry.member.name)}</span>
         </div>
         <div>
-          <div class="player-name">${entry.member.name}</div>
+          <div class="player-name">${escapeHtml(entry.member.name)}</div>
           <div class="player-tier ${tier.cls}">${tier.label}</div>
         </div>
       </div>
@@ -433,13 +454,18 @@ function renderPlayer(stats, target, seasonId) {
 async function render() {
   root.innerHTML = `<div class="overlay pos-${POSITION}"><div class="loading">Loading…</div></div>`;
   try {
+    const cfg = await fetchConfig();
+    if (cfg) {
+      CLAN = { ...CLAN, ...cfg };
+      document.title = `[${CLAN.shortName || 'Clan'}] Clan Overlay`;
+    }
     const { stats, seasonId } = await fetchStats();
     const inner = PLAYER
       ? renderPlayer(stats, PLAYER, seasonId)
       : renderLeaderboard(stats, seasonId);
     root.innerHTML = `<div class="overlay pos-${POSITION}">${inner}</div>`;
   } catch (e) {
-    root.innerHTML = `<div class="overlay pos-${POSITION}"><div class="error-msg">⚠ ${e.message}</div></div>`;
+    root.innerHTML = `<div class="overlay pos-${POSITION}"><div class="error-msg">⚠ ${escapeHtml(e.message)}</div></div>`;
   }
 }
 

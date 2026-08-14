@@ -1,11 +1,12 @@
 // ── Secret Keys reference page ────────────────────────────────────────────────
 const SECRET_KEY_MAPS = [
-  { map: 'Erangel', rooms: 15, loot: 'Level 3 gear · Airdrop weapons (AWM, Groza)', img: 'https://pubgsecretroom.com/pubg-erangel-secret-room-map-location.webp', color: '#22d3ee', badge: 'Classic' },
-  { map: 'Taego',   rooms: 15, loot: 'Level 3 gear · Airdrop guns · Self-AED · Med Kits', img: 'https://pubgsecretroom.com/pubg-taego-secret-room-map-location.webp', color: '#4ade80', badge: 'Modern' },
-  { map: 'Deston',  rooms: null, loot: 'Level 3 gear · AWM · Rare crate-tier weapons', img: 'https://pubgsecretroom.com/pubg-deston-secret-room-map-location.png', color: '#f59e0b', badge: 'Fixed Loot' },
-  { map: 'Vikendi', rooms: null, loot: 'Guaranteed Level 3 gear · Airdrop weapons', img: 'https://pubgsecretroom.com/pubg-vikendi-secret-room-map-location.jpg', color: '#a78bfa', badge: 'No Key' },
-  { map: 'Paramo',  rooms: null, loot: 'Adrenaline Syringes · Med Kits · Level 3 armor', img: 'https://pubgsecretroom.com/pubg-paramo-secret-room-map-location.jpg', color: '#f472b6', badge: 'Dynamic' },
-  { map: 'Rondo',   rooms: null, loot: 'Level 3 gear · Crate-tier weapons', img: 'https://pubgsecretroom.com/pubg-rondo-secret-room-map-location.webp', color: '#fb923c', badge: 'New' },
+  { map: 'Erangel', rooms: 15, loot: 'Level 3 gear · Airdrop weapons (AWM, Groza)', img: '/images/maps/erangel.png', color: '#22d3ee', badge: 'Classic' },
+  { map: 'Taego',   rooms: 15, loot: 'Level 3 gear · Airdrop guns · Self-AED · Med Kits', img: '/images/maps/taego.png', color: '#4ade80', badge: 'Modern' },
+  { map: 'Deston',  rooms: null, loot: 'Level 3 gear · AWM · Rare crate-tier weapons', img: '/images/maps/deston.png', color: '#f59e0b', badge: 'Fixed Loot' },
+  { map: 'Miramar', rooms: null, loot: 'High-value loot in abandoned mine secret rooms · unlock with Secret Room Keys', img: '/images/maps/miramar.png', color: '#fb923c', badge: '41.2 New', note: 'Secret room locations added in Update 41.2.' },
+  { map: 'Vikendi', rooms: null, loot: 'Guaranteed Level 3 gear · Airdrop weapons', img: '/images/maps/vikendi.png', color: '#a78bfa', badge: 'No Key' },
+  { map: 'Paramo',  rooms: null, loot: 'Adrenaline Syringes · Med Kits · Level 3 armor', img: '/images/maps/paramo.png', color: '#f472b6', badge: 'Dynamic' },
+  { map: 'Rondo',   rooms: null, loot: 'Level 3 gear · Crate-tier weapons', img: '/images/maps/rondo.png', color: '#fb923c', badge: 'New' },
 ];
 
 function SecretKeys() {
@@ -144,6 +145,11 @@ function SecretKeys() {
                 <div style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.5 }}>
                   <span style={{ color: m.color, fontWeight: 700 }}>Loot: </span>{m.loot}
                 </div>
+                {m.note && (
+                  <div style={{ marginTop: 10, fontSize: 11, color: 'var(--text-3)', lineHeight: 1.45 }}>
+                    {m.note}
+                  </div>
+                )}
               </div>
             </div>
           );
@@ -152,9 +158,7 @@ function SecretKeys() {
 
       {/* Source credit */}
       <div style={{ marginTop: 24, padding: '10px 14px', background: 'rgba(255,255,255,.03)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 11, color: 'var(--text-3)', display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-        📌 Map images sourced from{' '}
-        <a href="https://pubgsecretroom.com" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)', textDecoration: 'none' }}>pubgsecretroom.com</a>
-        {' '}· Secret rooms only available in <strong style={{ color: 'var(--text-2)' }}>Normal Match</strong> mode · Loot resets each match.
+        📌 Map images from the official PUBG API assets · Secret rooms only available in <strong style={{ color: 'var(--text-2)' }}>Normal Match</strong> mode except where the game allows custom access.
       </div>
 
     </div>

@@ -1,0 +1,40 @@
+{
+  "clan": {
+    "name": "Third Party Incorporated",
+    "shortName": "3PI",
+    "tag": "3PI",
+    "emoji": "🏢",
+    "memberNoun": "contractor",
+    "memberNounPlural": "contractors",
+    "subtitle": "Third Party Inc.",
+    "restrictedLabel": "Third Party Incorporated — Restricted",
+    "bootTitle": "Compiling contractor performance data. Please hold.",
+    "bootBody": "Our analysts are processing match reports, reconciling kill counts, and cross-referencing the latest official PUBG numbers. Your briefing will be ready momentarily."
+  },
+  "site": {
+    "publicUrl": "https://3pi.executiveundertakings.com",
+    "port": 3002
+  },
+  "discord": {
+    "guildId": "1507899743089459290",
+    "membershipRole": "Memo",
+    "adminUserIds": ["399378256438231050"],
+    "gracePeriodDays": 14,
+    "botUserAgent": "3PI-ClanBot/1.0",
+    "reactionRoles": [
+      {
+        "channelId": "1509025358492729454",
+        "messageId": "1512139595783864504",
+        "emoji": "💰",
+        "roleName": "vendordiscounts",
+        "roleId": "1512140635157565620",
+        "removeOnUnreact": true
+      }
+    ],
+    "pinnedInfo": {
+      "channelName": "performance-review",
+      "channelId": "1509016182177529926",
+      "messageId": "1509035659048910922"
+    }
+  }
+}

@@ -19,8 +19,11 @@ const { buildSquadStats }      = require('./build_squad_stats');
 const { buildLandingHeatmap }  = require('./build_landing_heatmap');
 const { buildTelemetryInsights } = require('./build_telemetry_insights');
 const { checkMilestones }      = require('./check_milestones');
+const { recoverMissedAnnouncements } = require('./recover_missed_announcements');
+const { normalizeAiInsights } = require('./normalize_ai_insights');
 const { execFileSync }         = require('child_process');
 const { PORT }                 = require('../lib/config');
+const { ensureDataDirectories, sanitizeForDiscord } = require('./cache_paths');
 
 // 12 min ceiling — the prewarm itself takes ~10 min for a 39-player roster,
 // observed 9.87 min on 2026-05-11. The previous 7-min ceiling was hardcoded
@@ -180,6 +183,17 @@ const TASKS = [
   },
 
   {
+    name: 'Normalize AI Insight Cache',
+    run: async () => {
+      const result = normalizeAiInsights({ verbose: true });
+      if (!result.found) return 'no AI cache yet';
+      return result.changed
+        ? `shortened ${result.changed} overlong tagline(s)`
+        : 'all taglines within 90 characters';
+    },
+  },
+
+  {
     name: 'Verify Data Integrity',
     run: async () => {
       const r = verifyIntegrity({ verbose: true });
@@ -194,6 +208,54 @@ const TASKS = [
       const result = await checkMilestones({ verbose: true });
       if (result.reason) return `0 posted (${result.reason})`;
       return `${result.posted || 0} milestone(s) posted · ${result.total || 0} found`;
+    },
+  },
+
+  {
+    name: 'Recover Missed Announcements',
+    run: async () => {
+      // Self-healing safety net: if the live notifier swallowed announce-able
+      // games during an outage (flood guard / no webhook), recap them in one
+      // consolidated digest. Idempotent — seeds silently on first run.
+      const r = await recoverMissedAnnouncements({ verbose: true });
+      if (r.reason)  return `skipped (${r.reason})`;
+      if (r.seeded)  return `seeded ${r.count} settled match(es) — first run`;
+      if (r.posted)  return `recapped ${r.missed} missed game(s)`;
+      if (r.dry)     return `${r.missed} missed but not posted (no webhook)`;
+      return 'nothing missed';
+    },
+  },
+
+  {
+    name: 'Check Notifier Health',
+    run: async () => {
+      // Posting-health freshness check. The live notifier writes
+      // data/notifier_health.json each scan; if it's missing a webhook or hasn't
+      // scanned recently, posting is broken even though match_history looks fresh
+      // (the exact blind spot behind the 6/13–6/16 swallow). Warn the operator.
+      const HEALTH = path.join(__dirname, '..', 'data', 'notifier_health.json');
+      let h;
+      try { h = JSON.parse(fs.readFileSync(HEALTH, 'utf8')); }
+      catch { return 'no health file yet (notifier not scanned since deploy)'; }
+
+      const problems = [];
+      if (!h.webhookConfigured) problems.push('notifier has no webhook configured');
+      const scanAgeMin = h.lastScanAt ? (Date.now() - new Date(h.lastScanAt).getTime()) / 60000 : Infinity;
+      if (scanAgeMin > 20) problems.push(`last scan ${Number.isFinite(scanAgeMin) ? Math.round(scanAgeMin) + ' min ago' : 'never'} (poll is every 5 min)`);
+
+      if (!problems.length) return `healthy (scan ${Math.round(scanAgeMin)} min ago)`;
+
+      try {
+        const { sendAdminDms } = require('../lib/discord');
+        await sendAdminDms({ embeds: [{
+          title: 'Notifier posting health',
+          description: problems.map(p => `- ${sanitizeForDiscord(p)}`).join('\n') +
+            '\n\nAnnouncements may be getting swallowed. Check the clan-server process and webhook configuration.',
+          color: 0xfacc15,
+          footer: { text: 'data/notifier_health.json' },
+        }] });
+      } catch (e) { /* non-fatal */ }
+      return `WARN: ${problems.join('; ')}`;
     },
   },
 
@@ -242,26 +304,23 @@ function writeStatusFile(payload) {
   }
 }
 
-// Best-effort Discord alert when any step fails — never throws, never blocks exit.
+// Best-effort operator alert when any step fails — never throws, never blocks exit.
 async function alertFailures(results) {
   try {
-    const { loadEnv } = require('../lib/config');
-    const { postWebhook } = require('../lib/discord');
-    const webhookUrl = loadEnv().DISCORD_WEBHOOK_URL;
-    if (!webhookUrl) return;
+    const { sendAdminDms } = require('../lib/discord');
     const failed = results.filter(r => !r.ok);
     if (!failed.length) return;
-    await postWebhook(webhookUrl, {
+    const sent = await sendAdminDms({
       embeds: [{
-        title: `⚠️ Daily pipeline: ${failed.length} step(s) failed`,
-        description: failed.map(f => `**${f.task}** — ${String(f.error).slice(0, 180)}`).join('\n'),
+        title: `Daily pipeline: ${failed.length} step(s) failed`,
+        description: failed.map(f => `**${f.task}** — ${sanitizeForDiscord(f.error).slice(0, 180)}`).join('\n'),
         footer: { text: 'See ~/Library/Logs/clan-daily-pipeline.log on the host' },
         color: 0xf87171,
       }],
     });
-    console.log(`[3PI Daily] Posted failure alert for ${failed.length} step(s)`);
+    console.log(`[3PI Daily] Sent failure DM for ${failed.length} step(s) to ${sent.sent || 0} admin(s)`);
   } catch (e) {
-    console.warn('[3PI Daily] Could not post failure alert:', e.message);
+    console.warn('[3PI Daily] Could not send failure DM:', e.message);
   }
 }
 
@@ -272,6 +331,26 @@ async function main() {
   console.log(`${'═'.repeat(56)}`);
 
   const results = [];
+  try {
+    ensureDataDirectories();
+  } catch (e) {
+    const totalSecs = +(((Date.now() - started) / 1000).toFixed(1));
+    const setupFailure = [{ task: 'Prepare Data Directories', ok: false, error: e.message, secs: totalSecs }];
+    console.error(`[Prepare Data Directories] ✗ ${e.message} (${totalSecs}s)`);
+    writeStatusFile({
+      date:       new Date().toISOString().slice(0, 10),
+      startedAt:  new Date(started).toISOString(),
+      finishedAt: new Date().toISOString(),
+      totalSecs,
+      allOk:      false,
+      passed:     0,
+      total:      1,
+      results:    setupFailure,
+    });
+    await alertFailures(setupFailure);
+    process.exit(1);
+  }
+
   for (const task of TASKS) {
     const t0 = Date.now();
     process.stdout.write(`\n[${task.name}] Running…\n`);

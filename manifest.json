@@ -1,7 +1,7 @@
 {
-  "name": "APES Clan Stats",
-  "short_name": "APES",
-  "description": "PUBG clan statistics for APES",
+  "name": "Third Party Incorporated",
+  "short_name": "3PI",
+  "description": "PUBG clan statistics for Third Party Incorporated",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#070b12",

@@ -11,8 +11,12 @@ function initials(name) {
   return name.slice(0, 2).toUpperCase();
 }
 
+function coverageText(coverage) {
+  return historyCoverageLabel(coverage);
+}
+
 // ── PlayerCard — individual player card with inline match expansion ────────────
-function PlayerCard({ entry, seasonError, weaponEntry, historyEntry, lifetimeEntry, onViewProfile }) {
+function PlayerCard({ entry, seasonError, weaponEntry, historyEntry, lifetimeEntry, spotlights, analysisProfile, onViewProfile }) {
   const [expanded, setExpanded]         = useState(false);
   const [matches, setMatches]           = useState(null);
   const [matchLoading, setMatchLoading] = useState(false);
@@ -30,14 +34,31 @@ function PlayerCard({ entry, seasonError, weaponEntry, historyEntry, lifetimeEnt
                   !(sd?.data?.attributes?.gameModeStats?.['squad-fpp']?.roundsPlayed > 0));
 
   const APE_IMGS = [
-    '/images/ape1.png', '/images/ape2.png', '/images/ape3.png',
-    '/images/img1.png', '/images/img2.png', '/images/img3.png',
-    '/images/img4.png', '/images/img5.png', '/images/img6.png',
-    '/images/img7.png', '/images/ape_gorilla.png',
-    '/images/ape_shotgun.png', '/images/ape_tactical.png',
+    // Portrait / studio shots — centered subject, dark bg
+    { src: '/images/corp1.png',        pos: 'center top'    },
+    { src: '/images/corp2.png',        pos: 'center top'    },
+    { src: '/images/corp3.png',        pos: 'center top'    },
+    { src: '/images/corp_sniper.png',  pos: 'center top'    },
+    { src: '/images/corp_shotgun.png', pos: 'center top'    },
+    { src: '/images/corp_tactical.png',pos: 'center top'    },
+    // Scene shots — subjects at bottom of frame
+    { src: '/images/img1.png',         pos: 'center bottom' },
+    { src: '/images/img2.png',         pos: 'center bottom' },
+    // Full-frame action shots
+    { src: '/images/img4.png',         pos: 'center'        },
+    { src: '/images/img5.png',         pos: 'center'        },
+    { src: '/images/img6.png',         pos: 'center'        },
+    { src: '/images/img7.png',         pos: 'center'        },
+    { src: '/images/corp_squad.png',   pos: 'center top'    },
   ];
   const nameHash = member.name.split('').reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 0);
-  const imgSrc   = APE_IMGS[Math.abs(nameHash) % APE_IMGS.length];
+  const imgEntry = APE_IMGS[Math.abs(nameHash) % APE_IMGS.length];
+  const imgSrc   = imgEntry.src;
+  const imgPos   = imgEntry.pos;
+  const coverage = historyEntry?.coverage || entry.coverage || null;
+  const coverageState = historyCoverageSummary(coverage);
+  const partialCapture = !!(coverageState?.apiRounds && !coverageState.trusted);
+  const captureLabel = coverageText(coverage);
 
   // Live refresh — only called via the ↻ button; cached history shows immediately
   async function fetchLiveMatches() {
@@ -46,7 +67,7 @@ function PlayerCard({ entry, seasonError, weaponEntry, historyEntry, lifetimeEnt
     setMatchError(null);
     try {
       const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('Request timed out — API may be rate-limited. Try again in a minute.')), 20000));
-      const url = `/api/matches/player?accountId=${member.accountId}&limit=5&bust=1`;
+      const url = `/api/matches/player?accountId=${member.accountId}&limit=5`;
       const d = await Promise.race([api.get(url), timeout]);
       setMatches(d.matches);
     } catch (e) {
@@ -113,7 +134,7 @@ function PlayerCard({ entry, seasonError, weaponEntry, historyEntry, lifetimeEnt
     >
       {/* Card header */}
       <div style={{ position: 'relative', overflow: 'hidden', padding: '14px 16px 12px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 12 }}>
-        <img src={imgSrc} alt="" aria-hidden="true" style={{ position: 'absolute', right: -10, top: 0, height: '100%', width: 90, objectFit: 'cover', objectPosition: 'center top', opacity: 0.18, maskImage: 'linear-gradient(to left, rgba(0,0,0,0.8), transparent)', WebkitMaskImage: 'linear-gradient(to left, rgba(0,0,0,0.8), transparent)', pointerEvents: 'none' }} />
+        <img src={imgSrc} alt="" aria-hidden="true" style={{ position: 'absolute', right: -10, top: 0, height: '100%', width: 90, objectFit: 'cover', objectPosition: imgPos, opacity: 0.28, maskImage: 'linear-gradient(to left, rgba(0,0,0,0.85), transparent)', WebkitMaskImage: 'linear-gradient(to left, rgba(0,0,0,0.85), transparent)', pointerEvents: 'none' }} />
         <div style={{ position: 'absolute', inset: 0, background: `linear-gradient(135deg, ${tier.glow} 0%, transparent 100%)`, pointerEvents: 'none' }} />
         <div style={{ width: 44, height: 44, borderRadius: '50%', background: `${tier.color}22`, border: `2px solid ${tier.color}66`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 800, color: tier.color, flexShrink: 0 }}>
           {initials(member.name)}
@@ -239,6 +260,7 @@ function PlayerCard({ entry, seasonError, weaponEntry, historyEntry, lifetimeEnt
                   {weapons.slice(0, 3).map(w => (
                     <div key={w.weaponClass} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '2px 7px', borderRadius: 4, background: 'var(--bg-raised)', border: '1px solid var(--border)', fontSize: 10 }}>
                       <span style={{ fontWeight: 700, color: 'var(--text-1)' }}>{w.displayName}</span>
+                      {w.status?.retiringSoon && <span title={w.status.label} style={{ color: '#fb923c', fontWeight: 700 }}>42.1</span>}
                       <span style={{ color: 'var(--text-3)' }}>{w.kills}K</span>
                       {w.hsRate > 0 && <span style={{ color: '#facc15', fontWeight: 600 }}>{Math.round(w.hsRate * 100)}%HS</span>}
                       {w.knockdowns > 0 && w.knockdowns !== w.kills && <span style={{ color: '#60a5fa', fontWeight: 600 }}>{w.knockdowns}↓</span>}
@@ -275,11 +297,24 @@ function PlayerCard({ entry, seasonError, weaponEntry, historyEntry, lifetimeEnt
       {/* Inline match history — expands directly inside the card when clicked */}
       {expanded && (
         <div style={{ borderTop: `1px solid ${tier.color}44`, padding: '12px 16px 14px', background: `${tier.glow}` }} onClick={e => e.stopPropagation()}>
+
+          {/* Per-player AI analysis — summary + tip from daily task */}
+          {analysisProfile && (analysisProfile.summary || analysisProfile.tip) && (
+            <div style={{ marginBottom: 12, borderRadius: 7, padding: '9px 11px', background: 'rgba(148,163,184,.06)', border: '1px solid rgba(148,163,184,.15)' }}>
+              <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '.07em', textTransform: 'uppercase', color: 'var(--text-3)', marginBottom: 6 }}>🤖 AI Scouting Report</div>
+              {analysisProfile.summary && <p style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.55, margin: '0 0 6px' }}>{analysisProfile.summary}</p>}
+              {analysisProfile.tip && <div style={{ fontSize: 10, color: '#93c5fd', fontStyle: 'italic' }}>💡 {analysisProfile.tip}</div>}
+            </div>
+          )}
+
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 9 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <div style={{ fontWeight: 700, fontSize: 11, color: tier.color, textTransform: 'uppercase', letterSpacing: '.07em' }}>Recent Matches</div>
               {!matches && historyEntry?.recent?.length > 0 && (
                 <span style={{ fontSize: 9, color: 'var(--text-3)', fontWeight: 600 }}>cached · {historyEntry.recent.length} games</span>
+              )}
+              {!matches && partialCapture && captureLabel && (
+                <span style={{ fontSize: 9, color: '#facc15', fontWeight: 700 }}>partial · {captureLabel}</span>
               )}
               {matches && (
                 <span style={{ fontSize: 9, color: tier.color, fontWeight: 600 }}>live</span>
@@ -295,6 +330,11 @@ function PlayerCard({ entry, seasonError, weaponEntry, historyEntry, lifetimeEnt
             >{matchLoading ? <Spinner size="sm" /> : '↻'}</button>
           </div>
           {matchError && <div style={{ color: '#f87171', fontSize: 12, marginBottom: 8 }}>Error: {matchError}</div>}
+          {partialCapture && (
+            <div style={{ marginBottom: 8, fontSize: 10, color: '#facc15' }}>
+              Cached detail is partial for this season: {captureLabel}. Totals above come from the official PUBG API.
+            </div>
+          )}
           {(() => {
             // Prefer live data; fall back to cache
             const rawList = matches || historyEntry?.recent || [];
@@ -363,6 +403,37 @@ function PlayerCard({ entry, seasonError, weaponEntry, historyEntry, lifetimeEnt
               </div>
             );
           })()}
+
+          {/* AI Spotlight cards for this player */}
+          {spotlights && spotlights.length > 0 && (
+            <div style={{ marginTop: 12 }}>
+              <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '.07em', textTransform: 'uppercase', color: 'var(--text-3)', marginBottom: 6 }}>🤖 Today's AI Insight</div>
+              {spotlights.map(sp => (
+                <div key={sp.id} style={{ marginBottom: 6, borderRadius: 7, padding: '9px 11px', background: 'rgba(96,165,250,.06)', border: '1px solid rgba(96,165,250,.2)' }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: '#60a5fa', marginBottom: 5 }}>{sp.icon} {sp.title}</div>
+                  <p style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.55, margin: '0 0 6px' }}>{sp.finding}</p>
+                  <div style={{ fontSize: 10, color: '#93c5fd', fontStyle: 'italic' }}>💡 {sp.tip}</div>
+                  {sp.bars && sp.bars.length > 0 && (
+                    <div style={{ marginTop: 7, display: 'flex', flexDirection: 'column', gap: 3 }}>
+                      {sp.bars.map((b, bi) => {
+                        const barColor = b.tone === 'good' ? '#34d399' : b.tone === 'bad' ? '#f87171' : b.tone === 'warn' ? '#facc15' : '#94a3b8';
+                        const pct = Math.min(b.max > 0 ? (b.val / b.max) * 100 : 0, 100);
+                        return (
+                          <div key={bi} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <div style={{ width: 80, fontSize: 9, color: 'var(--text-3)', flexShrink: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.name}</div>
+                            <div style={{ flex: 1, height: 5, borderRadius: 3, background: 'var(--border)', overflow: 'hidden' }}>
+                              <div style={{ width: `${pct}%`, height: '100%', background: barColor, borderRadius: 3, transition: 'width .4s' }} />
+                            </div>
+                            <div style={{ width: 34, fontSize: 9, fontWeight: 700, color: barColor, textAlign: 'right', flexShrink: 0 }}>{b.label}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -370,7 +441,7 @@ function PlayerCard({ entry, seasonError, weaponEntry, historyEntry, lifetimeEnt
 }
 
 // ── Player Profile Modal ──────────────────────────────────────────────────────
-function PlayerProfileModal({ entry, weaponEntry, historyEntry, lifetimeEntry, analysisProfile, onClose }) {
+function PlayerProfileModal({ entry, weaponEntry, historyEntry, lifetimeEntry, analysisProfile, spotlights, onClose }) {
   const [activeTab, setActiveTab] = useState('overview');
 
   // Destructure everything from the trunk entry — never re-derive
@@ -382,22 +453,39 @@ function PlayerProfileModal({ entry, weaponEntry, historyEntry, lifetimeEntry, a
   const tier = playerTier(kdVal || 0);
 
   const APE_IMGS = [
-    '/images/ape1.png', '/images/ape2.png', '/images/ape3.png',
-    '/images/img1.png', '/images/img2.png', '/images/img3.png',
-    '/images/img4.png', '/images/img5.png', '/images/img6.png',
-    '/images/img7.png', '/images/ape_gorilla.png',
-    '/images/ape_shotgun.png', '/images/ape_tactical.png',
+    // Portrait / studio shots — centered subject, dark bg
+    { src: '/images/corp1.png',        pos: 'center top'    },
+    { src: '/images/corp2.png',        pos: 'center top'    },
+    { src: '/images/corp3.png',        pos: 'center top'    },
+    { src: '/images/corp_sniper.png',  pos: 'center top'    },
+    { src: '/images/corp_shotgun.png', pos: 'center top'    },
+    { src: '/images/corp_tactical.png',pos: 'center top'    },
+    // Scene shots — subjects at bottom of frame
+    { src: '/images/img1.png',         pos: 'center bottom' },
+    { src: '/images/img2.png',         pos: 'center bottom' },
+    // Full-frame action shots
+    { src: '/images/img4.png',         pos: 'center'        },
+    { src: '/images/img5.png',         pos: 'center'        },
+    { src: '/images/img6.png',         pos: 'center'        },
+    { src: '/images/img7.png',         pos: 'center'        },
+    { src: '/images/corp_squad.png',   pos: 'center top'    },
   ];
   const nameHash = member.name.split('').reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 0);
-  const imgSrc   = APE_IMGS[Math.abs(nameHash) % APE_IMGS.length];
+  const imgEntry = APE_IMGS[Math.abs(nameHash) % APE_IMGS.length];
+  const imgSrc   = imgEntry.src;
+  const imgPos   = imgEntry.pos;
+  const coverage = historyEntry?.coverage || entry.coverage || null;
+  const coverageState = historyCoverageSummary(coverage);
+  const partialCapture = !!(coverageState?.apiRounds && !coverageState.trusted);
+  const captureLabel = coverageText(coverage);
 
   // Season stats object — all derived values from trunk, raw counts from trunk
   const season = s ? {
     games,    kills,    deaths: losses,
     kd:       kdVal,    wins,   winRate,    top10Rate,
     avgDmg,   hsRate,
-    revivesPg: games > 0 ? (revives / games).toFixed(2) : '0', // revives from sApi via trunk
-    longestKill: Math.round(longestKill),                        // from sApi via trunk
+    revivesPg: games > 0 ? (revives / games).toFixed(2) : '0',
+    longestKill: Math.round(longestKill),
   } : null;
 
   // Squad chemistry from recent match history
@@ -450,7 +538,7 @@ function PlayerProfileModal({ entry, weaponEntry, historyEntry, lifetimeEntry, a
 
         {/* Header */}
         <div style={{ position: 'relative', overflow: 'hidden', padding: '20px 24px 16px', borderBottom: '1px solid var(--border)', background: `linear-gradient(135deg, ${tier.glow} 0%, transparent 60%)` }}>
-          <img src={imgSrc} alt="" aria-hidden="true" style={{ position: 'absolute', right: 0, top: 0, height: '100%', width: 120, objectFit: 'cover', objectPosition: 'center top', opacity: 0.15, maskImage: 'linear-gradient(to left, rgba(0,0,0,0.7), transparent)', WebkitMaskImage: 'linear-gradient(to left, rgba(0,0,0,0.7), transparent)', pointerEvents: 'none' }} />
+          <img src={imgSrc} alt="" aria-hidden="true" style={{ position: 'absolute', right: 0, top: 0, height: '100%', width: 120, objectFit: 'cover', objectPosition: imgPos, opacity: 0.40, maskImage: 'linear-gradient(to left, rgba(0,0,0,0.8), transparent)', WebkitMaskImage: 'linear-gradient(to left, rgba(0,0,0,0.8), transparent)', pointerEvents: 'none' }} />
           <button onClick={onClose} style={{ position: 'absolute', top: 12, right: 16, background: 'none', border: 'none', color: 'var(--text-3)', cursor: 'pointer', fontSize: 22, lineHeight: 1, padding: 4 }}>×</button>
           <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
             <div style={{ width: 52, height: 52, borderRadius: '50%', background: `${tier.color}22`, border: `2px solid ${tier.color}88`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, fontWeight: 800, color: tier.color, flexShrink: 0 }}>
@@ -462,6 +550,7 @@ function PlayerProfileModal({ entry, weaponEntry, historyEntry, lifetimeEntry, a
                 {tier.emoji} {tier.label}
                 {season && <span style={{ color: 'var(--text-3)', fontWeight: 500 }}>· {fmt(season.games)} games this season</span>}
                 {lifetimeEntry && <span style={{ color: 'var(--text-3)', fontWeight: 500 }}>· {fmt(lifetimeEntry.games)} career</span>}
+                {partialCapture && <span style={{ color: '#facc15', fontWeight: 700 }}>· partial capture ({captureLabel})</span>}
               </div>
             </div>
           </div>
@@ -508,8 +597,8 @@ function PlayerProfileModal({ entry, weaponEntry, historyEntry, lifetimeEntry, a
                     { label: 'K/D Ratio',   tip: 'Kill/Death ratio',                                val: kdVal.toFixed(2),                 sub: `${fmt(season.kills)} kills / ${fmt(season.deaths)} deaths` },
                     { label: 'Win Rate',    tip: null,                                               val: pct(season.wins, season.games),   sub: `${season.wins} wins from ${fmt(season.games)} games` },
                     { label: 'Avg Damage',  tip: 'Average damage dealt per match',                  val: fmt(season.avgDmg),               sub: `${pct(season.wins, season.games)} win rate` },
-                    { label: 'HS Rate',     tip: 'Headshot kill percentage',                         val: pct(season.hsRate * season.kills, season.kills), sub: `${fmt(Math.round(season.hsRate * season.kills))} headshot kills` },
-                    { label: 'Top-10 Rate', tip: 'Percentage of games finishing in the top 10',     val: pct(season.top10Rate * season.games, season.games), sub: `${Math.round(season.top10Rate * season.games)} top-10s` },
+                    { label: 'HS Rate',     tip: 'Headshot kill percentage',                         val: `${(season.hsRate * 100).toFixed(1)}%`, sub: `${fmt(Math.round(season.hsRate * season.kills))} headshot kills` },
+                    { label: 'Top-10 Rate', tip: 'Percentage of games finishing in the top 10',     val: `${(season.top10Rate * 100).toFixed(1)}%`, sub: `${Math.round(season.top10Rate * season.games)} top-10s` },
                     { label: 'Revives/g',   tip: 'Teammate revives per game',                        val: season.revivesPg,                 sub: `Longest kill: ${season.longestKill}m` },
                   ].map(item => (
                     <div key={item.label} style={{ background: 'var(--bg-raised)', borderRadius: 8, padding: '10px 12px', border: '1px solid var(--border)' }}>
@@ -547,7 +636,7 @@ function PlayerProfileModal({ entry, weaponEntry, historyEntry, lifetimeEntry, a
                         </div>
                       );
                     })}
-                    <div style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 4 }}>Career: {fmt(lifetimeEntry.games)} total games across all modes · Season % change vs career avg</div>
+                    <div style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 4 }}>Career: {fmt(lifetimeEntry.games)} total official squad games · Season % change vs career avg</div>
                   </div>
                 </div>
               )}
@@ -589,13 +678,57 @@ function PlayerProfileModal({ entry, weaponEntry, historyEntry, lifetimeEntry, a
                 </div>
               )}
 
-              {/* AI Analysis */}
-              {analysisProfile && (
+              {/* AI Analysis (per-player summary from analysis_cache, generated by daily task) */}
+              {analysisProfile && (analysisProfile.summary || analysisProfile.tip) && (
                 <div style={{ background: 'var(--bg-raised)', borderRadius: 8, padding: '12px 14px', border: '1px solid var(--border)' }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-2)', marginBottom: 8 }}>🤖 AI Analysis</div>
-                  <p style={{ fontSize: 13, color: 'var(--text-2)', lineHeight: 1.6, margin: '0 0 10px' }}>{analysisProfile.summary}</p>
-                  <div style={{ background: 'rgba(96,165,250,.08)', border: '1px solid rgba(96,165,250,.2)', borderRadius: 6, padding: '8px 12px', fontSize: 12, color: '#93c5fd' }}>
-                    <span style={{ fontWeight: 700 }}>💡 Top tip: </span>{analysisProfile.tip}
+                  <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-2)', marginBottom: 8 }}>🤖 AI Player Profile</div>
+                  {analysisProfile.summary && <p style={{ fontSize: 13, color: 'var(--text-2)', lineHeight: 1.6, margin: '0 0 10px' }}>{analysisProfile.summary}</p>}
+                  {analysisProfile.tip && (
+                    <div style={{ background: 'rgba(96,165,250,.08)', border: '1px solid rgba(96,165,250,.2)', borderRadius: 6, padding: '8px 12px', fontSize: 12, color: '#93c5fd' }}>
+                      <span style={{ fontWeight: 700 }}>💡 Top tip: </span>{analysisProfile.tip}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* AI Spotlight cards mentioning this player */}
+              {spotlights && spotlights.length > 0 && (
+                <div style={{ background: 'var(--bg-raised)', borderRadius: 8, padding: '12px 14px', border: '1px solid var(--border)' }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-2)', marginBottom: 10 }}>✨ Today's Spotlight{spotlights.length > 1 ? 's' : ''}</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {spotlights.map(sp => (
+                      <div key={sp.id} style={{ borderRadius: 7, padding: '10px 12px', background: 'rgba(96,165,250,.06)', border: '1px solid rgba(96,165,250,.2)' }}>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: '#60a5fa', marginBottom: 6 }}>{sp.icon} {sp.title}</div>
+                        <p style={{ fontSize: 12, color: 'var(--text-2)', lineHeight: 1.6, margin: '0 0 8px' }}>{sp.finding}</p>
+                        <div style={{ fontSize: 11, color: '#93c5fd', fontStyle: 'italic', marginBottom: sp.bars?.length ? 8 : 0 }}>💡 {sp.tip}</div>
+                        {sp.hero && (
+                          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: sp.bars?.length ? 8 : 0 }}>
+                            <span style={{ fontSize: 24, fontWeight: 900, color: '#60a5fa' }}>{sp.hero.value}</span>
+                            <div>
+                              <div style={{ fontSize: 11, color: 'var(--text-2)', fontWeight: 600 }}>{sp.hero.unit}</div>
+                              {sp.hero.sub && <div style={{ fontSize: 10, color: 'var(--text-3)' }}>{sp.hero.sub}</div>}
+                            </div>
+                          </div>
+                        )}
+                        {sp.bars && sp.bars.length > 0 && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                            {sp.bars.map((b, bi) => {
+                              const barColor = b.tone === 'good' ? '#34d399' : b.tone === 'bad' ? '#f87171' : b.tone === 'warn' ? '#facc15' : '#94a3b8';
+                              const pct = Math.min(b.max > 0 ? (b.val / b.max) * 100 : 0, 100);
+                              return (
+                                <div key={bi} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                  <div style={{ width: 100, fontSize: 10, color: 'var(--text-3)', flexShrink: 0 }}>{b.name}</div>
+                                  <div style={{ flex: 1, height: 6, borderRadius: 3, background: 'var(--border)', overflow: 'hidden' }}>
+                                    <div style={{ width: `${pct}%`, height: '100%', background: barColor, borderRadius: 3 }} />
+                                  </div>
+                                  <div style={{ width: 40, fontSize: 10, fontWeight: 700, color: barColor, textAlign: 'right', flexShrink: 0 }}>{b.label}</div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}
@@ -605,6 +738,11 @@ function PlayerProfileModal({ entry, weaponEntry, historyEntry, lifetimeEntry, a
           {/* ── WEAPONS ── */}
           {activeTab === 'weapons' && (
             <div>
+              {partialCapture && (
+                <div style={{ marginBottom: 12, padding: '8px 12px', background: 'rgba(250,204,21,.08)', border: '1px solid rgba(250,204,21,.25)', borderRadius: 8, fontSize: 11, color: '#facc15' }}>
+                  Weapon detail is based on captured telemetry only: {captureLabel}. Season totals elsewhere in this profile come from the official PUBG API.
+                </div>
+              )}
               {weaponEntry?.weapons?.length ? (
                 <div style={{ overflowX: 'auto' }}>
                   {/* Blue zone badge */}
@@ -638,7 +776,16 @@ function PlayerProfileModal({ entry, weaponEntry, historyEntry, lifetimeEntry, a
                     <tbody>
                       {weaponEntry.weapons.map((w, i) => (
                         <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,.04)' }}>
-                          <td style={{ padding: '7px 8px', fontWeight: 700, color: 'var(--text-1)' }}>{w.displayName}</td>
+                          <td style={{ padding: '7px 8px', fontWeight: 700, color: 'var(--text-1)' }}>
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                              <span>{w.displayName}</span>
+                              {w.status?.retiringSoon && (
+                                <span title={w.status.label} style={{ fontSize: 9, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '.08em', color: '#fb923c', background: 'rgba(251,146,60,.10)', border: '1px solid rgba(251,146,60,.28)', borderRadius: 999, padding: '2px 6px' }}>
+                                  {w.status.shortLabel}
+                                </span>
+                              )}
+                            </span>
+                          </td>
                           <td style={{ padding: '7px 8px', textAlign: 'right', fontWeight: 600, color: '#60a5fa' }}>{w.kills}</td>
                           <td style={{ padding: '7px 8px', textAlign: 'right', color: 'var(--text-2)' }}>{w.knockdowns || 0}</td>
                           <td style={{ padding: '7px 8px', textAlign: 'right', color: w.hsRate >= 0.25 ? '#34d399' : 'var(--text-2)' }}>{(w.hsRate * 100).toFixed(0)}%</td>
@@ -657,6 +804,11 @@ function PlayerProfileModal({ entry, weaponEntry, historyEntry, lifetimeEntry, a
           {/* ── MAPS ── */}
           {activeTab === 'maps' && (
             <div>
+              {partialCapture && (
+                <div style={{ marginBottom: 12, padding: '8px 12px', background: 'rgba(250,204,21,.08)', border: '1px solid rgba(250,204,21,.25)', borderRadius: 8, fontSize: 11, color: '#facc15' }}>
+                  Map splits reflect captured match detail only: {captureLabel}.
+                </div>
+              )}
               {historyEntry?.mapStats?.length ? (
                 <div style={{ overflowX: 'auto' }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
@@ -732,9 +884,22 @@ function PlayerProfileModal({ entry, weaponEntry, historyEntry, lifetimeEntry, a
 }
 
 // ── Players tab ───────────────────────────────────────────────────────────────
-function Players({ resolvedStats, loading, weaponData, lifetimeData, analysisData }) {
+function Players({ resolvedStats, loading, weaponData, lifetimeData, analysisData, aiInsights, playerProfiles }) {
   const [playerSort, setPlayerSort] = useState('kd');
   const [profileTarget, setProfileTarget] = useState(null);
+
+  // Build a map of playerName (lowercase) → spotlight cards that mention them
+  const spotlightsByPlayer = useMemo(() => {
+    const map = {};
+    for (const sp of (aiInsights?.spotlights || [])) {
+      for (const name of (sp.players || [])) {
+        const key = name.toLowerCase();
+        if (!map[key]) map[key] = [];
+        map[key].push(sp);
+      }
+    }
+    return map;
+  }, [aiInsights]);
 
   const sortedStats = useMemo(() => {
     if (!resolvedStats) return resolvedStats;
@@ -750,7 +915,7 @@ function Players({ resolvedStats, loading, weaponData, lifetimeData, analysisDat
   }, [resolvedStats, playerSort]);
 
   if (loading) return (
-    <div className="p-6 grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+    <div className="p-6 players-grid">
       {[...Array(6)].map((_,i) => <div key={i} className="skeleton h-48 rounded-xl"/>)}
     </div>
   );
@@ -772,6 +937,19 @@ function Players({ resolvedStats, loading, weaponData, lifetimeData, analysisDat
 
   return (
     <div className="p-6 space-y-4">
+
+      {/* ── Cinematic header banner ── */}
+      <div style={{ position: 'relative', borderRadius: 16, overflow: 'hidden', height: 110, border: '1px solid var(--border)', marginBottom: 4 }}>
+        <img src="/images/img2.png" alt="" aria-hidden="true" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center bottom', opacity: 0.65 }} />
+        {/* Dark vignette so text stays legible */}
+        <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to right, rgba(7,11,18,.92) 0%, rgba(7,11,18,.6) 50%, rgba(7,11,18,.85) 100%)' }} />
+        <div style={{ position: 'relative', padding: '18px 24px', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+          <div style={{ fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '.18em', color: 'var(--accent)', marginBottom: 4 }}>Field Roster</div>
+          <div style={{ fontSize: 22, fontWeight: 900, color: '#fff', letterSpacing: '-.03em', lineHeight: 1 }}>Contractors</div>
+          <div style={{ fontSize: 11, color: 'rgba(255,255,255,.5)', marginTop: 4 }}>{sortedStats?.length || 0} active this season</div>
+        </div>
+      </div>
+
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
         <h2 style={{ fontSize: 18, fontWeight: 700 }}>Players</h2>
         <div style={{ display: 'flex', gap: 4, background: 'var(--bg-card)', borderRadius: 8, padding: 4, border: '1px solid var(--border)', flexWrap: 'wrap' }}>
@@ -780,12 +958,14 @@ function Players({ resolvedStats, loading, weaponData, lifetimeData, analysisDat
           ))}
         </div>
       </div>
-      <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4" style={{ alignItems: 'start' }}>
+      <div className="players-grid" style={{ alignItems: 'start' }}>
         {sortedStats.map(entry => {
-          const { member, form, mapStats, recent } = entry;
-          const historyEntry  = { form, mapStats, recent };
+          const { member, form, mapStats, recent, coverage } = entry;
+          const historyEntry  = { form, mapStats, recent, coverage };
           const weaponEntry   = weaponData?.[member.accountId];
           const lifetimeEntry = lifetimeData?.players?.[member.accountId];
+          const playerSpotlights   = spotlightsByPlayer[member.name.toLowerCase()] || [];
+          const playerProfile      = (playerProfiles?.players || []).find(p => p.name.toLowerCase() === member.name.toLowerCase()) || null;
           return (
             <PlayerCard
               key={member.accountId}
@@ -794,7 +974,9 @@ function Players({ resolvedStats, loading, weaponData, lifetimeData, analysisDat
               weaponEntry={weaponEntry}
               historyEntry={historyEntry}
               lifetimeEntry={lifetimeEntry}
-              onViewProfile={() => setProfileTarget({ entry, weaponEntry, historyEntry, lifetimeEntry })}
+              spotlights={playerSpotlights}
+              analysisProfile={playerProfile}
+              onViewProfile={() => setProfileTarget({ entry, weaponEntry, historyEntry, lifetimeEntry, spotlights: playerSpotlights, analysisProfile: playerProfile })}
             />
           );
         })}
@@ -805,7 +987,8 @@ function Players({ resolvedStats, loading, weaponData, lifetimeData, analysisDat
           weaponEntry={profileTarget.weaponEntry}
           historyEntry={profileTarget.historyEntry}
           lifetimeEntry={profileTarget.lifetimeEntry}
-          analysisProfile={analysisData?.players?.find(p => p.name.toLowerCase() === profileTarget.entry.member.name.toLowerCase()) || null}
+          analysisProfile={profileTarget.analysisProfile || null}
+          spotlights={profileTarget.spotlights || []}
           onClose={() => setProfileTarget(null)}
         />
       )}

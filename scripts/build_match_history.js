@@ -9,6 +9,7 @@ const fs   = require('fs');
 const path = require('path');
 const { ensureSeasonStateFromMatchCache, isCurrentSeasonMatch } = require('../lib/season-state');
 const { getMatchFilterDecision, formatMatchDebug } = require('../lib/match-filters');
+const { ensureMatchCacheDir, listMatchCacheFiles } = require('./cache_paths');
 
 const BASE               = path.join(__dirname, '..');
 const MATCH_CACHE_DIR    = path.join(BASE, 'data', 'match_cache');
@@ -147,6 +148,7 @@ function shouldPreservePreviousEntry(previousEntry, nextEntry) {
 
 function buildMatchHistory(opts = {}) {
   const verbose = opts.verbose ?? true;
+  ensureMatchCacheDir();
   const seasonState = ensureSeasonStateFromMatchCache(MATCH_CACHE_DIR);
   const seasonStartAt = seasonState.seasonStartAt || null;
   const currentSeasonId = seasonState.cacheSeasonId || seasonState.seasonId || null;
@@ -158,8 +160,7 @@ function buildMatchHistory(opts = {}) {
   const memberIdSet = new Set(members.map(m => m.accountId));
   const memberById  = Object.fromEntries(members.map(m => [m.accountId, m.name]));
 
-  if (!fs.existsSync(MATCH_CACHE_DIR)) throw new Error('match_cache/ not found');
-  const files = fs.readdirSync(MATCH_CACHE_DIR).filter(f => f.endsWith('.json'));
+  const files = listMatchCacheFiles();
   if (verbose) console.log(`[history] Processing ${files.length} cached matches…`);
 
   // { accountId → [{ matchId, date, placement, won, kills, assists, dbnos, hs, damage, survival, map, mode, teammates[] }] }

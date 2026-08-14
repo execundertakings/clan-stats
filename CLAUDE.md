@@ -82,6 +82,10 @@ When building `match_history_cache.json`, two hard filters apply to every match 
 
 Only matches passing both filters are aggregated. `build_match_history.js` is the **only** writer of `match_history_cache.json`.
 
+Two hard-won rules (see header comment in `lib/match-filters.js` for full rationale):
+- **Never filter zero-impact participant entries** (0 kills / 0 damage / 0 DBNOs, died by player). Investigated 2026-06-12: telemetry confirms these are legitimate passive games, they're 19.4% of all entries, and PUBG's official API counts them — filtering would diverge from API truth.
+- **`trainingroom` matches are never written to `match_cache/`** (`lib/pubg.js` `NEVER_PERSIST_MATCH_TYPES`). Their IDs go into `data/skipped_matches.json` so `fetch_recent_matches.js` doesn't re-fetch them every run.
+
 ### Layer 3 — Frontend trunk (`js/app.js` → `resolvedStats`)
 All raw data converges into one pre-computed `resolvedStats` useMemo. No component derives stats independently.
 
@@ -91,7 +95,7 @@ All raw data converges into one pre-computed `resolvedStats` useMemo. No compone
 
 ```bash
 # Full rebuild (JS + CSS) — must run on the host Mac, NOT in sandbox
-cd "/Users/jean/Documents/Clan stats page"
+cd "/Users/jean/Documents/projects/Clan stats page"
 node build.js && npx tailwindcss -i ./src/styles.css -o ./dist/styles.css --minify
 ```
 
@@ -278,7 +282,11 @@ Single scheduled task, runs at **6 AM daily**. Two phases. The version-controlle
 6. **Build Landing Heatmap** — `build_landing_heatmap.js` → `data/landing_cache.json`
 7. **Build Telemetry Playbook** — `build_telemetry_insights.js` → `data/telemetry_insights_cache.json`
 8. **Check Milestones** — `check_milestones.js` → posts to Discord if new milestones
-9. **Weekly Discord Digest** *(Sundays only)* — `build_weekly_digest.js` → posts summary to Discord
+9. **Recover Missed Announcements** — `recover_missed_announcements.js` → if the live notifier swallowed announce-able games during an outage (flood guard / no-webhook), posts ONE consolidated catch-up digest. Idempotent; seeds silently on first run via `data/recovery_state.json`; tracks announced matches in `notified._posted`. Added 2026-06-16 after a 3.5-day notifier swallow.
+10. **Check Notifier Health** — reads `data/notifier_health.json` (written by `lib/notifier.js` each scan) and posts a Discord warning if the notifier has no webhook or hasn't scanned in >20 min — so a posting outage can't hide behind a still-fresh `match_history`.
+11. **Weekly Discord Digest** *(Sundays only)* — `build_weekly_digest.js` → posts summary to Discord
+
+**Drive-offline alerting:** the off-drive launcher (`~/Library/Application Support/clan-stats/launch-daily-pipeline.sh`) alerts via Discord (cached webhook), macOS notification, **and iMessage** (`alert_recipient.txt`) when the Storage drive is unmounted at run time or disconnects mid-run. The pipeline launchd agent also has `StartOnMount` (catches a late drive mount), guarded by a once-per-day success marker + pid lock so it can't double-run.
 
 `compute_trends.js` and `compute_analysis.js` have been removed — trends/analysis are computed client-side from `resolvedStats`.
 

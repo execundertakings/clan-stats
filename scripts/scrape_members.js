@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 'use strict';
-// Scrapes Greg's recent match history to find APES clan members by squad.
+// Scrapes Greg's recent match history to find clan members by squad.
 // Writes results to data/scraped_members.json
 
 const fs      = require('fs');
 const path    = require('path');
 const ROOT    = path.join(__dirname, '..');
 
-const { pubgGet } = require(path.join(ROOT, 'lib/pubg'));
-const { DATA }    = require(path.join(ROOT, 'lib/config'));
+const { getMatch } = require(path.join(ROOT, 'lib/pubg'));
+const { DATA }     = require(path.join(ROOT, 'lib/config'));
 
 const GREG_ID = 'account.d37764f6787b4098a6ce16d751a65117';
 const OUT_FILE = path.join(DATA, 'scraped_members.json');
@@ -38,8 +38,6 @@ function log(msg) {
   fs.appendFileSync(LOG_FILE, line + '\n');
 }
 
-function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-
 (async () => {
   const clanMembers = new Map();
 
@@ -48,7 +46,9 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
   for (let i = 0; i < matchIds.length; i++) {
     const matchId = matchIds[i];
     try {
-      const d = await pubgGet('/shards/steam/matches/' + matchId);
+      // Reuse the shared PUBG wrapper so this script respects the same queue and
+      // disk cache as the live app instead of pacing itself independently.
+      const d = await getMatch(matchId);
       const participants = (d.included || []).filter(x => x.type === 'participant');
       const rosters      = (d.included || []).filter(x => x.type === 'roster');
 
@@ -75,8 +75,6 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
     } catch (e) {
       log('Error on ' + matchId.slice(0,8) + ': ' + e.message);
     }
-
-    if (i < matchIds.length - 1) await sleep(6500); // 10 RPM safe
   }
 
   const result = [...clanMembers.entries()].map(([accountId, name]) => ({

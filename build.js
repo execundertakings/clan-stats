@@ -1,4 +1,4 @@
-// ── APES Clan Stats — build pipeline ─────────────────────────────────────────
+// ── Clan Stats — build pipeline ─────────────────────────────────────────
 // Concatenates all js/ modules, transpiles JSX → JS with esbuild, writes
 // dist/bundle.js. Run: node build.js  (or npm run build for CSS too)
 const esbuild = require('esbuild');

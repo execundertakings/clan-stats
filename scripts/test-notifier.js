@@ -119,7 +119,7 @@ function findParticipant(matchData, accountId) {
 // ── Main ──────────────────────────────────────────────────────────────────────
 async function main() {
   console.log('══════════════════════════════════════════════════════════');
-  console.log('  APES Notifier Dry-Run Diagnostic');
+  console.log('  3PI Notifier Dry-Run Diagnostic');
   console.log(`  Mode: ${FIX_MODE ? '⚠️  --fix (will update notified.json)' : 'read-only'}`);
   console.log('══════════════════════════════════════════════════════════\n');
 

@@ -12,6 +12,7 @@ const path    = require('path');
 const { ensureSeasonStateFromMatchCache, isCurrentSeasonMatch } = require('../lib/season-state');
 const { getTelemetry } = require('../lib/telemetry');
 const { MATCH_FILTER_POLICY_VERSION, isCountingSquadMatch } = require('../lib/match-filters');
+const { ensureMatchCacheDir, listMatchCacheFiles } = require('./cache_paths');
 
 const ROOT          = path.join(__dirname, '..');
 const MATCH_DIR     = path.join(ROOT, 'data', 'match_cache');
@@ -146,13 +147,14 @@ async function buildLandingHeatmap({ verbose = false } = {}) {
   if (!fs.existsSync(MEMBERS_FILE)) throw new Error('members.json not found');
   const members    = JSON.parse(fs.readFileSync(MEMBERS_FILE, 'utf8'));
   const memberIds  = new Set(members.map(m => m.accountId));
+  ensureMatchCacheDir();
   const seasonState = ensureSeasonStateFromMatchCache(MATCH_DIR);
   const seasonStartAt = seasonState.seasonStartAt || null;
   const cache      = loadCache(seasonState);
   const processed  = new Set(cache.processedMatches || []);
   const failed     = cache.failedMatches || {};
 
-  const matchFiles = fs.readdirSync(MATCH_DIR).filter(f => f.endsWith('.json'));
+  const matchFiles = listMatchCacheFiles();
   const toProcess  = [];
 
   for (const file of matchFiles) {

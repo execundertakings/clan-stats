@@ -19,6 +19,7 @@ const { startGateway, gatewayState }       = require('./lib/discord-gateway');
 const { prewarm, prewarmStats, diskCacheHasRealStats } = require('./lib/prewarm');
 const { clearCache, cacheSize } = require('./lib/pubg');
 const { requireAdmin, verifyAdminRequest } = require('./lib/admin-auth');
+const { recordView, trafficSummary }       = require('./lib/traffic');
 
 function combineLifetimeStats(lifetime) {
   const modes = lifetime?.data?.attributes?.gameModeStats;
@@ -327,6 +328,12 @@ async function router(req, res) {
         return jsonRes(res, frontendClanConfig());
       }
 
+      // Site traffic summary — self-hosted counter, aggregated counts only
+      if (req.method === 'GET' && p === '/api/traffic') {
+        const lastN = Math.min(parseInt(url.searchParams.get('days'), 10) || 30, 120);
+        return jsonRes(res, trafficSummary(lastN));
+      }
+
       // Discord Gateway status
       if (req.method === 'GET' && p === '/api/gateway/status') {
         return jsonRes(res, gatewayState());
@@ -390,6 +397,7 @@ async function router(req, res) {
   // index.html is served with clan branding injected (title, boot screen,
   // window.__CLAN_CONFIG__) so the frontend reads from the single config source.
   if (p === '/' || p === '/index.html') {
+    if (req.method === 'GET') recordView(req);
     return serveIndex(res);
   }
 

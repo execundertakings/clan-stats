@@ -22,6 +22,7 @@ const fs   = require('fs');
 const path = require('path');
 const { getMatchFilterDecision } = require('../lib/match-filters');
 const { isCurrentSeasonMatch }   = require('../lib/season-state');
+const { ensureMatchCacheDir, listMatchCacheFiles } = require('./cache_paths');
 
 const ROOT      = path.join(__dirname, '..');
 const DATA      = path.join(ROOT, 'data');
@@ -41,8 +42,8 @@ function recomputeFromMatchCache(members, seasonStartAt, builtAtMs) {
   const perPlayer = {};
   for (const id of idSet) perPlayer[id] = [];
 
-  for (const file of fs.readdirSync(MATCH_DIR)) {
-    if (!file.endsWith('.json')) continue;
+  ensureMatchCacheDir();
+  for (const file of listMatchCacheFiles()) {
     const full = path.join(MATCH_DIR, file);
     if (builtAtMs) {
       try { if (fs.statSync(full).mtimeMs > builtAtMs) continue; } catch { continue; }

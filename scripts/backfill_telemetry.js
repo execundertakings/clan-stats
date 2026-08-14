@@ -17,6 +17,7 @@ const path = require('path');
 const { getMatchFilterDecision } = require('../lib/match-filters');
 const { isCurrentSeasonMatch }   = require('../lib/season-state');
 const { CACHE_DIR, getTelemetry } = require('../lib/telemetry');
+const { listMatchCacheFiles } = require('./cache_paths');
 
 const ROOT       = path.join(__dirname, '..');
 const DATA       = path.join(ROOT, 'data');
@@ -46,8 +47,7 @@ async function backfillTelemetry(opts = {}) {
   // Collect current-season counting matches missing telemetry
   const missing = [];
   let eligible = 0;
-  for (const file of fs.readdirSync(MATCH_DIR)) {
-    if (!file.endsWith('.json')) continue;
+  for (const file of listMatchCacheFiles()) {
     let raw;
     try { raw = JSON.parse(fs.readFileSync(path.join(MATCH_DIR, file), 'utf8')); } catch { continue; }
     const attr = raw.data?.attributes || {};
